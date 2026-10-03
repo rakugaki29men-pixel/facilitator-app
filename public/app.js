@@ -77,6 +77,12 @@ const listener = new Listener({
   },
   onState(s) {
     if (s.startsWith("error:")) log("error", `音声認識: ${s.slice(6)}`);
+    // マイクが使えないまま進行すると「聞いていないのにしゃべる」状態になるので止める
+    if (s.includes("許可されていません") && state.running) {
+      log("error", "マイクを許可してから、もう一度「開始」を押してください（アドレスバー左のアイコン →「権限」→ マイク）。");
+      stop();
+      return;
+    }
     refreshStatus();
   },
 });

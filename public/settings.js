@@ -26,6 +26,17 @@ export const SPEECH_PRESETS = [
   { id: "nya", label: "ねこ", firstPerson: "ボク", ending: "〜にゃ", catchphrase: "にゃるほど" },
 ];
 
+// 声のタイプ。端末の声の種類は選べる数が少ないので、高さと速さを変えて雰囲気を作る。
+export const VOICE_TYPES = [
+  { label: "標準", pitch: 1.0, rate: 1.1 },
+  { label: "男性っぽく", pitch: 0.7, rate: 1.0 },
+  { label: "女性っぽく", pitch: 1.25, rate: 1.1 },
+  { label: "おじいちゃん", pitch: 0.55, rate: 0.8 },
+  { label: "おばあちゃん", pitch: 1.35, rate: 0.8 },
+  { label: "子ども", pitch: 1.8, rate: 1.2 },
+  { label: "早口の実況", pitch: 1.0, rate: 1.6 },
+];
+
 // ---- 小さなDOMヘルパー ----
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -235,16 +246,37 @@ export const SECTIONS = [
       fillVoices();
       speechSynthesis.addEventListener("voiceschanged", fillVoices);
 
+      const sliders = {}; // key -> { input, out }
       const range = (key, min, max, step) => {
         const out = el("output", { textContent: value[key] });
-        return el("div", { className: "range" },
-          el("input", { type: "range", min, max, step, value: value[key], oninput: (e) => { out.textContent = e.target.value; set(key)(Number(e.target.value)); } }),
-          out);
+        const input = el("input", { type: "range", min, max, step, value: value[key], oninput: (e) => { out.textContent = e.target.value; set(key)(Number(e.target.value)); } });
+        sliders[key] = { input, out };
+        return el("div", { className: "range" }, input, out);
       };
+
+      const typeRow = el("div", { className: "chips" },
+        ...VOICE_TYPES.map((t) =>
+          el("button", {
+            type: "button",
+            className: "chip",
+            textContent: t.label,
+            onclick: () => {
+              for (const key of ["pitch", "rate"]) {
+                value[key] = t[key];
+                sliders[key].input.value = t[key];
+                sliders[key].out.textContent = t[key];
+              }
+              update(value);
+              document.querySelector("#voice-test")?.click(); // 押したらすぐ試し聞きできる
+            },
+          }),
+        ),
+      );
 
       root.append(
         field("AIに判断させる間隔（秒）", range("intervalSec", 10, 120, 5)),
-        field("声", voiceSelect),
+        field("声のタイプ（押すと下の速さと高さが変わります）", typeRow),
+        field("声の種類（端末にある日本語の声）", voiceSelect),
         field("話す速さ", range("rate", 0.6, 1.8, 0.1)),
         field("声の高さ", range("pitch", 0.5, 1.8, 0.1)),
       );
