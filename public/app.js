@@ -6,6 +6,16 @@ const $ = (sel) => document.querySelector(sel);
 
 const settings = loadSettings();
 
+// 合言葉はこの端末のブラウザにだけ保存する（設定とは別。AIへの指示文には入れない）
+const PASSCODE_KEY = "facilitator-passcode";
+function passcode() {
+  try {
+    return localStorage.getItem(PASSCODE_KEY) || "";
+  } catch {
+    return $("#passcode").value;
+  }
+}
+
 const state = {
   running: false,
   startedAt: 0,
@@ -108,7 +118,7 @@ async function check(mode) {
   try {
     const res = await fetch("/api/decide", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-Passcode": passcode() },
       body: JSON.stringify({
         system: buildSystemPrompt(settings),
         user: buildUserMessage({ mode, recentHeard, earlierHeard, aiHistory: state.aiHistory, startedAt: state.startedAt, now }),
@@ -144,6 +154,11 @@ setInterval(() => {
 
 // ---- ボタン ----
 function start() {
+  if (!passcode()) {
+    log("error", "先に設定欄の「合言葉」を入力してください。");
+    $("#passcode").focus();
+    return;
+  }
   if (!isRecognitionSupported) {
     log("error", "このブラウザは音声認識に対応していません。Chrome か Edge を使ってください。");
     return;
@@ -197,6 +212,14 @@ $("#manual").addEventListener("submit", (e) => {
 });
 
 // ---- 初期化 ----
+$("#passcode").value = passcode();
+$("#passcode").addEventListener("input", (e) => {
+  try {
+    localStorage.setItem(PASSCODE_KEY, e.target.value);
+  } catch {
+    // 保存できなくても、入力欄の値をそのまま使う
+  }
+});
 renderSettings($("#settings"), settings, refreshPromptPreview);
 refreshPromptPreview();
 refreshStatus();

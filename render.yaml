@@ -1,0 +1,15 @@
+# Render の Blueprint。Render で「New → Blueprint」からこのリポジトリを選ぶと、この内容で作られる。
+services:
+  - type: web
+    name: facilitator-app
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false   # 作成時に画面で入力する（リポジトリには書かない）
+      - key: FACILITATOR_PASSCODE
+        sync: false   # 自分で決めた合言葉を画面で入力する
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini

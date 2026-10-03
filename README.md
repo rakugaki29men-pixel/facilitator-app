@@ -8,34 +8,45 @@
 - ブラウザの音声認識が勝手に止まったら自動で再起動する
 - 幹事用の「次へ」ボタンで、いつでも話題を切り替えさせられる
 
-## 起動方法
+## 公開のしかた（Render・スマホだけでOK）
 
-Node.js 20 以上が必要です。
+APIキーを守るため、キーは Render の設定画面にだけ入れます（ブラウザにもGitHubにも置きません）。
+アプリを開く人には「合言葉」を求めるので、アドレスを知られてもAPIは使われません。
 
-```bash
-npm install
-export ANTHROPIC_API_KEY=sk-ant-...   # Windows PowerShell の場合は $env:ANTHROPIC_API_KEY="sk-ant-..."
-npm start
-```
+1. OpenAI の管理画面でAPIキーを作り、**利用上限額を低め（例：月5ドル）に設定**しておく
+2. https://render.com に GitHub アカウントでログインする
+3. 「New」→「Blueprint」→ このリポジトリ（`facilitator-app`）を選ぶ
+   ※ ブランチは `ccr-0e561db0-crfcsd` を指定する
+4. 入力欄が2つ出るので入力する
+   - `OPENAI_API_KEY` … OpenAI のAPIキー
+   - `FACILITATOR_PASSCODE` … 自分で決めた合言葉（8文字以上、推測されにくいもの）
+5. 「Apply」を押して数分待つと、`https://facilitator-app-xxxx.onrender.com` のようなアドレスができる
+6. そのアドレスを Chrome で開き、画面の「合言葉」欄に入力して「▶ 開始」
 
-**Chrome か Edge** で http://localhost:3000 を開き、「▶ 開始」を押します。初回はマイクの使用許可を求められます。
+無料プランは、しばらく使わないと止まり、次に開いたとき起動に50秒ほどかかります。
+**会が始まる前に一度開いておいてください。**
 
 | 環境変数 | 初期値 | 内容 |
 | --- | --- | --- |
-| `ANTHROPIC_API_KEY` | （必須） | Claude の APIキー |
-| `PORT` | `3000` | 待ち受けポート |
-| `FACILITATOR_MODEL` | `claude-opus-5-5` | 使うモデル |
-| `FACILITATOR_EFFORT` | `low` | AIの考える深さ（`low` / `medium` / `high`）。上げると返事が遅くなる |
+| `OPENAI_API_KEY` | （必須） | OpenAI のAPIキー |
+| `FACILITATOR_PASSCODE` | （必須） | 画面で入力する合言葉。未設定だとサーバーが起動しない |
+| `OPENAI_MODEL` | `gpt-4o-mini` | 使うモデル。返事の速さ重視で小さめのモデルを推奨 |
+| `OPENAI_REASONING_EFFORT` | （未設定） | 推論モデルを使うときだけ `low` などを設定 |
+
+### 自分のPCで動かす場合
+
+Node.js 20 以上で、`OPENAI_API_KEY` と `FACILITATOR_PASSCODE` を環境変数に入れて `npm start`、
+http://localhost:3000 を開きます。
 
 ## 当日の使い方
 
-1. 開始前に右側の設定を入れる（参加者・キャラ・しゃべり方）。設定はブラウザに自動保存されます
+1. 開始前に画面の設定を入れる（参加者・キャラ・しゃべり方）。設定はブラウザに自動保存されます
 2. 「🔊 声のテスト」で音量と声を確認
 3. 「▶ 開始」で開会のあいさつから始まります
 4. 進行が迷子になったら「次へ ⏭」。しゃべっている途中でも打ち切って次の話題へ進みます
 5. 設定は会の途中でも変えられます。次の判断から反映されます
 
-マイクがなくても、左上の入力欄に文字を入れると「聞き取った」ことにできます（動作確認用）。
+マイクがなくても、入力欄に文字を入れると「聞き取った」ことにできます（動作確認用）。
 「AIへの指示文を確認」を開くと、設定がどうAIに伝わっているかが見られます。
 
 ## しくみ
@@ -44,7 +55,7 @@ npm start
 ブラウザ                                          サーバー (server.js)
  ├ speech.js   音声認識(自動再起動) / 読み上げ
  ├ settings.js 設定項目の登録簿・設定画面・保存
- ├ prompt.js   設定 + 聞き取り内容 → AIへの指示文     ─POST /api/decide→  Claude API
+ ├ prompt.js   設定 + 聞き取り内容 → AIへの指示文     ─POST /api/decide→  OpenAI API
  └ app.js      タイマー・「次へ」・読み上げ中の聞き取り停止  ←{speak, utterance, reason}─
 ```
 
@@ -72,4 +83,4 @@ AIへの指示文は判断のたびに設定から作り直すので、途中の
 ## 注意
 
 - 音声認識は Chrome / Edge の Web Speech API を使います。音声はブラウザ提供元のサーバーで処理されます
-- 認識結果と設定内容（参加者の名前・メモ）は Claude API に送られます
+- 認識結果と設定内容（参加者の名前・メモ）は OpenAI API に送られます

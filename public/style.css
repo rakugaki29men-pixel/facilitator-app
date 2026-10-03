@@ -108,7 +108,7 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 .field { display: grid; gap: 4px; }
 .field > span { font-size: 0.85rem; color: var(--muted); }
 
-input[type="text"], select, textarea {
+input[type="text"], input[type="password"], select, textarea {
   width: 100%;
   padding: 7px 9px;
   border: 1px solid var(--border);
@@ -143,3 +143,5 @@ textarea { resize: vertical; }
   max-height: 50vh;
   overflow-y: auto;
 }
+
+.passcode { margin-bottom: 12px; }
