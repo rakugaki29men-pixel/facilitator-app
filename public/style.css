@@ -1,0 +1,145 @@
+:root {
+  --bg: #f6f5f2;
+  --panel: #ffffff;
+  --text: #1f1f1f;
+  --muted: #6b6b6b;
+  --border: #dddad3;
+  --accent: #d9480f;
+  --accent-soft: #fff0e6;
+  --ok: #2b8a3e;
+  --think: #5f3dc4;
+  --error: #c92a2a;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+button, input, select, textarea { font: inherit; }
+
+button {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+button:disabled { opacity: 0.4; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+  padding: 12px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.topbar h1 { font-size: 1.1rem; margin: 0; }
+.controls { display: flex; gap: 8px; margin-left: auto; }
+.controls .next {
+  font-size: 1.2rem;
+  font-weight: bold;
+  padding: 10px 24px;
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+#status { font-weight: bold; color: var(--muted); }
+#status[data-kind="listening"] { color: var(--ok); }
+#status[data-kind="speaking"] { color: var(--accent); }
+#status[data-kind="thinking"] { color: var(--think); }
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 420px);
+  gap: 16px;
+  padding: 16px;
+}
+@media (max-width: 860px) {
+  .layout { grid-template-columns: minmax(0, 1fr); }
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+}
+.panel h2 { margin: 0 0 12px; font-size: 1rem; }
+.panel h2 small { font-weight: normal; color: var(--muted); margin-left: 8px; }
+
+.interim { min-height: 1.5em; color: var(--muted); font-style: italic; margin: 0 0 8px; }
+
+.manual { display: flex; gap: 8px; margin-bottom: 12px; }
+.manual input { flex: 1; min-width: 0; }
+
+.log { list-style: none; margin: 0; padding: 0; max-height: 70vh; overflow-y: auto; }
+.log li {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.log time { color: var(--muted); font-size: 0.8rem; font-variant-numeric: tabular-nums; padding-top: 2px; }
+.log small { grid-column: 2; color: var(--muted); }
+.log-heard span { color: #444; }
+.log-ai span { font-weight: bold; color: var(--accent); font-size: 1.1rem; }
+.log-skip span { color: var(--muted); }
+.log-system span { color: var(--think); }
+.log-error span { color: var(--error); }
+
+/* 設定 */
+.section { border-top: 1px solid var(--border); padding: 8px 0; }
+.section summary { font-weight: bold; cursor: pointer; padding: 4px 0; }
+.section-body { display: grid; gap: 10px; padding: 8px 0 4px; }
+
+.field { display: grid; gap: 4px; }
+.field > span { font-size: 0.85rem; color: var(--muted); }
+
+input[type="text"], select, textarea {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+}
+textarea { resize: vertical; }
+
+.hint { color: var(--muted); margin: 0; font-size: 0.9rem; }
+
+.participant-list { display: grid; gap: 6px; }
+.participant-row { display: grid; grid-template-columns: 7em 1fr auto; gap: 6px; }
+.add-row { padding-top: 6px; border-top: 1px dashed var(--border); }
+.icon-btn { padding: 4px 10px; }
+.icon-btn.add { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { padding: 4px 12px; border-radius: 999px; font-size: 0.9rem; }
+
+.range { display: flex; align-items: center; gap: 8px; }
+.range input { flex: 1; }
+.range output { width: 3em; text-align: right; font-variant-numeric: tabular-nums; }
+
+#voice-test { margin-top: 8px; }
+
+.preview pre {
+  white-space: pre-wrap;
+  font-size: 0.8rem;
+  background: var(--bg);
+  padding: 10px;
+  border-radius: 6px;
+  max-height: 50vh;
+  overflow-y: auto;
+}

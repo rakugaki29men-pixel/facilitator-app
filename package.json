@@ -1,0 +1,23 @@
+{
+  "name": "facilitator-app",
+  "version": "1.0.0",
+  "description": "懇親会用の音声ファシリテーションWebアプリ",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rakugaki29men-pixel/facilitator-app.git"
+  },
+  "license": "UNLICENSED",
+  "bugs": {
+    "url": "https://github.com/rakugaki29men-pixel/facilitator-app/issues"
+  },
+  "homepage": "https://github.com/rakugaki29men-pixel/facilitator-app#readme",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0"
+  },
+  "type": "module",
+  "private": true
+}

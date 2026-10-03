@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>懇親会ファシリテーター</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>懇親会ファシリテーター</h1>
+    <div id="status" data-kind="idle">停止中</div>
+    <div class="controls">
+      <button id="start" class="primary">▶ 開始</button>
+      <button id="stop" hidden>■ 停止</button>
+      <button id="next" class="next" disabled>次へ ⏭</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel live">
+      <h2>進行ログ</h2>
+      <p id="interim" class="interim" aria-live="polite"></p>
+      <form id="manual" class="manual">
+        <input id="manual-text" type="text" placeholder="手入力で「聞き取った」ことにする（動作確認用）">
+        <button type="submit">追加</button>
+      </form>
+      <ol id="log" class="log"></ol>
+    </section>
+
+    <section class="panel">
+      <h2>設定 <small>変更は次の判断から反映されます</small></h2>
+      <div id="settings"></div>
+      <button id="voice-test" type="button">🔊 声のテスト</button>
+      <details class="section preview">
+        <summary>AIへの指示文を確認</summary>
+        <pre id="prompt-preview"></pre>
+      </details>
+    </section>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
