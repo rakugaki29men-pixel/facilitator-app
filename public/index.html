@@ -7,41 +7,64 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="topbar">
-    <h1>懇親会ファシリテーター</h1>
-    <div id="status" data-kind="idle">停止中</div>
-    <div class="controls">
-      <button id="start" class="primary">▶ 開始</button>
-      <button id="stop" hidden>■ 停止</button>
+  <!-- 設定画面。進行中は「⚙ 設定」から重ねて開く -->
+  <div id="setup-view">
+    <header class="topbar">
+      <h1>懇親会ファシリテーター</h1>
+      <button id="start" class="primary big">▶ 開始</button>
+      <button id="close-settings" class="big" hidden>✕ 閉じる</button>
+    </header>
+    <p id="setup-msg" class="alert" role="alert" hidden></p>
+
+    <main class="setup">
+      <section class="panel">
+        <h2>設定 <small>変更は次の判断から反映されます</small></h2>
+        <label class="field passcode">
+          <span>合言葉（この端末にだけ保存されます）</span>
+          <input id="passcode" type="password" autocomplete="off" placeholder="Renderに設定した合言葉">
+        </label>
+        <div id="settings"></div>
+        <button id="voice-test" type="button">🔊 声のテスト</button>
+        <details class="section preview">
+          <summary>AIへの指示文を確認</summary>
+          <pre id="prompt-preview"></pre>
+        </details>
+      </section>
+    </main>
+  </div>
+
+  <!-- トーク中画面 -->
+  <div id="stage" data-mode="idle" hidden>
+    <header class="stage-top">
+      <span id="status" data-kind="idle">停止中</span>
+      <span id="event-name" class="event-name"></span>
+      <div class="stage-buttons">
+        <button id="open-settings" type="button">⚙ 設定</button>
+        <button id="stop" type="button">■ 停止</button>
+      </div>
+    </header>
+    <p id="stage-alert" class="alert" role="alert" hidden></p>
+
+    <section class="character">
+      <div id="avatar" class="avatar" aria-hidden="true">🎙️</div>
+      <div id="char-name" class="char-name"></div>
+      <div class="bubble"><p id="bubble" class="dim">みなさんの会話を聞いています…</p></div>
+      <p id="interim" class="caption" aria-live="polite"></p>
+    </section>
+
+    <div class="stage-bottom">
       <button id="next" class="next" disabled>次へ ⏭</button>
     </div>
-  </header>
 
-  <main class="layout">
-    <section class="panel live">
-      <h2>進行ログ</h2>
-      <p id="interim" class="interim" aria-live="polite"></p>
+    <details class="stage-log">
+      <summary>ログ・手入力</summary>
       <form id="manual" class="manual">
         <input id="manual-text" type="text" placeholder="手入力で「聞き取った」ことにする（動作確認用）">
         <button type="submit">追加</button>
       </form>
       <ol id="log" class="log"></ol>
-    </section>
-
-    <section class="panel">
-      <h2>設定 <small>変更は次の判断から反映されます</small></h2>
-      <label class="field passcode">
-        <span>合言葉（この端末にだけ保存されます）</span>
-        <input id="passcode" type="password" autocomplete="off" placeholder="Renderに設定した合言葉">
-      </label>
-      <div id="settings"></div>
-      <button id="voice-test" type="button">🔊 声のテスト</button>
-      <details class="section preview">
-        <summary>AIへの指示文を確認</summary>
-        <pre id="prompt-preview"></pre>
-      </details>
-    </section>
-  </main>
+    </details>
+  </div>
 
   <script type="module" src="app.js"></script>
 </body>

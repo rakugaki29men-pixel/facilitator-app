@@ -144,10 +144,21 @@ export function stopSpeaking() {
  * @param {string} [o.passcode]
  * @param {string} [o.voiceURI] @param {number} [o.rate] @param {number} [o.pitch]  ブラウザの声の設定
  * @param {(err:Error)=>void} [o.onFallback]
+ * @param {()=>void} [o.onStart]     声が出始めたとき
  */
-export async function speak(text, o = {}) {
+export async function speak(text, opts = {}) {
   stopSpeaking();
   const id = speakId;
+  // 声が出始める瞬間に1度だけ知らせる（OpenAIの声が失敗してブラウザの声に代わっても重複させない）
+  let started = false;
+  const o = {
+    ...opts,
+    onStart: () => {
+      if (started) return;
+      started = true;
+      opts.onStart?.();
+    },
+  };
   if (o.engine === "openai") {
     try {
       await speakOpenAI(text, o, id);
@@ -160,7 +171,7 @@ export async function speak(text, o = {}) {
   await speakBrowser(text, o);
 }
 
-async function speakOpenAI(text, { voice, instructions, passcode }, id) {
+async function speakOpenAI(text, { voice, instructions, passcode, onStart }, id) {
   const res = await fetch("/api/tts", {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Passcode": passcode || "" },
@@ -192,14 +203,14 @@ async function speakOpenAI(text, { voice, instructions, passcode }, id) {
         },
       };
       sharedAudio.src = url;
-      sharedAudio.play().catch((err) => finish(() => reject(err)));
+      sharedAudio.play().then(onStart, (err) => finish(() => reject(err)));
     });
   } finally {
     URL.revokeObjectURL(url);
   }
 }
 
-function speakBrowser(text, { voiceURI, rate = 1, pitch = 1 }) {
+function speakBrowser(text, { voiceURI, rate = 1, pitch = 1, onStart }) {
   return new Promise((resolve) => {
     const utter = new SpeechSynthesisUtterance(text);
     utter.lang = "ja-JP";
@@ -222,6 +233,7 @@ function speakBrowser(text, { voiceURI, rate = 1, pitch = 1 }) {
 
     // 参照を保持しないとGCされてイベントが来ない不具合への対策
     speakBrowser.current = utter;
+    onStart?.();
     speechSynthesis.speak(utter);
   });
 }

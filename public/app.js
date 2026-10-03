@@ -1,4 +1,4 @@
-import { loadSettings, renderSettings, ttsInstructions } from "./settings.js";
+import { loadSettings, renderSettings, ttsInstructions, characterView } from "./settings.js";
 import { buildSystemPrompt, buildUserMessage } from "./prompt.js";
 import { Listener, speak, stopSpeaking, unlockAudio, isRecognitionSupported } from "./speech.js";
 
@@ -22,24 +22,62 @@ const state = {
   lastCheckAt: 0, // 前回AIに判断させた時刻。これ以降の聞き取りが「直近」
   lastVoiceAt: 0, // 最後に誰かの声（途中経過を含む）を聞き取った時刻。沈黙の検知に使う
   busy: false, // AI問い合わせ中
-  speaking: false, // 読み上げ中
+  speaking: false, // 読み上げ処理中（声の準備中を含む）
+  talking: false, // 実際に声が出ている
   pendingNext: false, // 問い合わせ中に「次へ」が押された
   heard: [], // {at, text}
   aiHistory: [], // {at, text}
 };
 
-// ---- 表示 ----
-function setStatus(text, kind = "") {
-  const node = $("#status");
-  node.textContent = text;
-  node.dataset.kind = kind;
+// ---- 画面の切り替え ----
+// 設定画面(#setup-view)とトーク中画面(#stage)。進行中も「⚙ 設定」で設定を重ねて開ける。
+function updateView({ settingsOpen = false } = {}) {
+  const inStage = state.running;
+  $("#stage").hidden = !inStage;
+  $("#setup-view").hidden = inStage && !settingsOpen;
+  $("#setup-view").classList.toggle("overlay", inStage);
+  $("#start").hidden = inStage;
+  $("#close-settings").hidden = !inStage;
+  if (inStage && !settingsOpen) renderStage();
+  window.scrollTo(0, 0);
 }
 
+function renderStage() {
+  const { icon, name } = characterView(settings);
+  $("#avatar").textContent = icon;
+  $("#char-name").textContent = name;
+  $("#event-name").textContent = settings.event.name;
+}
+
+function setupMessage(text) {
+  const node = $("#setup-msg");
+  node.textContent = text;
+  node.hidden = !text;
+}
+
+let alertTimer = null;
+function stageAlert(text) {
+  const node = $("#stage-alert");
+  node.textContent = text;
+  node.hidden = false;
+  clearTimeout(alertTimer);
+  alertTimer = setTimeout(() => (node.hidden = true), 12_000);
+}
+
+// ---- 表示 ----
 function refreshStatus() {
-  if (!state.running) return setStatus("停止中", "idle");
-  if (state.speaking) return setStatus("🔊 しゃべっています（聞き取り停止中）", "speaking");
-  if (state.busy) return setStatus("🤔 AIが考え中…", "thinking");
-  setStatus("🎤 聞き取り中", "listening");
+  let mode = "idle";
+  let text = "停止中";
+  if (state.running) {
+    if (state.speaking && state.talking) [mode, text] = ["speaking", "🔊 しゃべっています"];
+    else if (state.speaking) [mode, text] = ["thinking", "🎙 声を準備中…"];
+    else if (state.busy) [mode, text] = ["thinking", "🤔 考え中…"];
+    else [mode, text] = ["listening", "🎤 聞き取り中"];
+  }
+  const node = $("#status");
+  node.textContent = text;
+  node.dataset.kind = mode;
+  $("#stage").dataset.mode = mode;
 }
 
 function log(kind, text, note = "") {
@@ -59,13 +97,52 @@ function log(kind, text, note = "") {
   }
   list.prepend(item);
   while (list.children.length > 200) list.lastChild.remove();
+  if (kind === "error") stageAlert(text);
 }
 
 function refreshPromptPreview() {
   $("#prompt-preview").textContent = buildSystemPrompt(settings);
 }
 
+// 吹き出し：声に合わせて1文字ずつ出す。終わったら全文を薄く残して、あとから読めるようにする
+let typeTimer = null;
+function showBubble(text) {
+  clearInterval(typeTimer);
+  const node = $("#bubble");
+  node.classList.remove("dim");
+  node.textContent = "";
+  let i = 0;
+  typeTimer = setInterval(() => {
+    node.textContent = text.slice(0, ++i);
+    if (i >= text.length) clearInterval(typeTimer);
+  }, 110);
+}
+function settleBubble(text) {
+  clearInterval(typeTimer);
+  const node = $("#bubble");
+  node.textContent = text;
+  node.classList.add("dim");
+}
+
+// 画面が消えると聞き取りも止まるので、進行中は消灯させない
+let wakeLock = null;
+async function keepAwake(on) {
+  try {
+    if (on) wakeLock = await navigator.wakeLock?.request("screen");
+    else {
+      await wakeLock?.release();
+      wakeLock = null;
+    }
+  } catch {
+    // 非対応・拒否でも進行には影響しない
+  }
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && state.running) keepAwake(true);
+});
+
 // ---- 聞き取り ----
+let captionTimer = null;
 const listener = new Listener({
   onFinal(text) {
     if (state.speaking) return;
@@ -73,17 +150,23 @@ const listener = new Listener({
     state.heard.push({ at: state.lastVoiceAt, text });
     if (state.heard.length > 300) state.heard.shift();
     log("heard", text);
+    // 聞き間違いもネタなので、聞き取った内容を字幕のように少しの間見せる
+    $("#interim").textContent = `👂 ${text}`;
+    clearTimeout(captionTimer);
+    captionTimer = setTimeout(() => ($("#interim").textContent = ""), 8000);
   },
   onInterim(text) {
-    $("#interim").textContent = text;
-    if (text && !state.speaking) state.lastVoiceAt = Date.now();
+    if (!text || state.speaking) return;
+    clearTimeout(captionTimer);
+    $("#interim").textContent = `👂 ${text}`;
+    state.lastVoiceAt = Date.now();
   },
   onState(s) {
     if (s.startsWith("error:")) log("error", `音声認識: ${s.slice(6)}`);
     // マイクが使えないまま進行すると「聞いていないのにしゃべる」状態になるので止める
     if (s.includes("許可されていません") && state.running) {
-      log("error", "マイクを許可してから、もう一度「開始」を押してください（アドレスバー左のアイコン →「権限」→ マイク）。");
       stop();
+      setupMessage("マイクが許可されていません。アドレスバー左のアイコン →「権限」→ マイク を許可してから、もう一度「開始」を押してください。");
       return;
     }
     refreshStatus();
@@ -113,11 +196,20 @@ async function say(text, reason = "") {
   state.aiHistory.push({ at: Date.now(), text });
   if (state.aiHistory.length > 8) state.aiHistory.shift();
 
-  await speak(text, voiceOptions());
+  await speak(text, {
+    ...voiceOptions(),
+    onStart: () => {
+      state.talking = true;
+      showBubble(text);
+      refreshStatus();
+    },
+  });
+  settleBubble(text);
   // 残響を拾わないよう少し待ってから聞き取りを再開
   await new Promise((r) => setTimeout(r, 600));
 
   state.speaking = false;
+  state.talking = false;
   // 発言直後にすぐ次の判断をしないよう、タイマーをここから数え直す。沈黙の数え直しも同じ
   state.lastCheckAt = state.lastVoiceAt = Date.now();
   if (state.running) listener.resume();
@@ -195,20 +287,25 @@ setInterval(() => {
 // ---- ボタン ----
 function start() {
   if (!passcode()) {
-    log("error", "先に設定欄の「合言葉」を入力してください。");
+    setupMessage("先に「合言葉」を入力してください。");
     $("#passcode").focus();
     return;
   }
   if (!isRecognitionSupported) {
-    log("error", "このブラウザは音声認識に対応していません。Chrome か Edge を使ってください。");
+    setupMessage("このブラウザは音声認識に対応していません。Chrome か Edge を使ってください。");
     return;
   }
+  setupMessage("");
   state.running = true;
   state.startedAt = state.lastCheckAt = state.lastVoiceAt = Date.now();
   unlockAudio(); // 開始ボタンを押した今のうちに、あとからの自動再生を許可してもらう
-  $("#start").hidden = true;
-  $("#stop").hidden = false;
+  keepAwake(true);
   $("#next").disabled = false;
+  $("#bubble").textContent = "みなさんの会話を聞いています…";
+  $("#bubble").classList.add("dim");
+  $("#interim").textContent = "";
+  $("#stage-alert").hidden = true;
+  updateView();
   listener.start();
   log("system", "開始しました");
   check("start");
@@ -217,17 +314,21 @@ function start() {
 function stop() {
   state.running = false;
   state.pendingNext = false;
+  state.speaking = state.talking = false;
   listener.stop();
   stopSpeaking();
-  $("#start").hidden = false;
-  $("#stop").hidden = true;
+  clearInterval(typeTimer);
+  keepAwake(false);
   $("#next").disabled = true;
   log("system", "停止しました");
+  updateView();
   refreshStatus();
 }
 
 $("#start").addEventListener("click", start);
 $("#stop").addEventListener("click", stop);
+$("#open-settings").addEventListener("click", () => updateView({ settingsOpen: true }));
+$("#close-settings").addEventListener("click", () => updateView());
 $("#next").addEventListener("click", () => {
   if (!state.running) return;
   log("system", "幹事が「次へ」を押しました");
@@ -266,4 +367,5 @@ $("#passcode").addEventListener("input", (e) => {
 renderSettings($("#settings"), settings, refreshPromptPreview);
 refreshPromptPreview();
 refreshStatus();
-if (!isRecognitionSupported) log("error", "このブラウザは音声認識に対応していません。Chrome か Edge を使ってください。");
+updateView();
+if (!isRecognitionSupported) setupMessage("このブラウザは音声認識に対応していません。Chrome か Edge を使ってください。");

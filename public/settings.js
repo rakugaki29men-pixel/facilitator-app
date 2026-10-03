@@ -9,12 +9,12 @@
 const STORAGE_KEY = "facilitator-settings-v1";
 
 export const CHARACTER_PRESETS = [
-  { id: "kansai", label: "関西の芸人司会", text: "ノリとツッコミが命の関西芸人。ボケを拾ってツッコみ、場を笑いで回す。" },
-  { id: "veteran", label: "ベテラン宴会司会", text: "場慣れした落ち着きのある宴会司会。全員に目を配り、さりげなく話を振る。" },
-  { id: "jikkyo", label: "熱血スポーツ実況", text: "何でも実況してしまう熱血アナウンサー。会話の盛り上がりを試合のように中継する。" },
-  { id: "butler", label: "老執事", text: "丁寧すぎる老執事。皆様をおもてなしするが、ときどき天然な発言をする。" },
-  { id: "yuru", label: "ゆるキャラ", text: "ふわっとしたゆるキャラ。のんびりしているが、急に核心を突く。" },
-  { id: "none", label: "（なし・自由記述のみ）", text: "" },
+  { id: "kansai", icon: "🎤", label: "関西の芸人司会", text: "ノリとツッコミが命の関西芸人。ボケを拾ってツッコみ、場を笑いで回す。" },
+  { id: "veteran", icon: "🍻", label: "ベテラン宴会司会", text: "場慣れした落ち着きのある宴会司会。全員に目を配り、さりげなく話を振る。" },
+  { id: "jikkyo", icon: "📣", label: "熱血スポーツ実況", text: "何でも実況してしまう熱血アナウンサー。会話の盛り上がりを試合のように中継する。" },
+  { id: "butler", icon: "🎩", label: "老執事", text: "丁寧すぎる老執事。皆様をおもてなしするが、ときどき天然な発言をする。" },
+  { id: "yuru", icon: "🐻", label: "ゆるキャラ", text: "ふわっとしたゆるキャラ。のんびりしているが、急に核心を突く。" },
+  { id: "none", icon: "🎙️", label: "（なし・自由記述のみ）", text: "" },
 ];
 
 export const SPEECH_PRESETS = [
@@ -167,7 +167,7 @@ export const SECTIONS = [
   {
     id: "character",
     title: "司会者のキャラ",
-    defaults: { preset: "kansai", custom: "" },
+    defaults: { preset: "kansai", custom: "", icon: "" },
     render(root, value, update) {
       const set = setter(value, update);
       const select = el(
@@ -178,6 +178,7 @@ export const SECTIONS = [
       root.append(
         field("プリセット", select),
         field("自由記述（プリセットに追加される）", textArea(value.custom, set("custom"), "例：部長のモノマネが得意。隙あらばダジャレを言う。")),
+        field("トーク画面のアイコン（絵文字1つ。空欄ならプリセットの絵）", textInput(value.icon, set("icon"), "例：🐶")),
       );
     },
     toPrompt(v) {
@@ -379,4 +380,14 @@ export function ttsInstructions(settings) {
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+// トーク中画面に出すキャラの見た目
+export function characterView(settings) {
+  const c = settings.character;
+  const preset = CHARACTER_PRESETS.find((p) => p.id === c.preset);
+  return {
+    icon: c.icon.trim() || preset?.icon || "🎙️",
+    name: preset && preset.id !== "none" ? preset.label : "司会者",
+  };
 }
