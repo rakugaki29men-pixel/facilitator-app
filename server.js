@@ -33,8 +33,9 @@ const DECISION_SCHEMA = {
     speak: { type: "boolean", description: "今、司会者として発言すべきか" },
     utterance: { type: "string", description: "読み上げるセリフ。speak=false なら空文字" },
     reason: { type: "string", description: "判断理由（幹事向けの短いメモ。読み上げない）" },
+    tension: { type: "integer", enum: [1, 2, 3, 4, 5], description: "実際に演じたテンションのレベル（1:とても静か〜5:最高潮）" },
   },
-  required: ["speak", "utterance", "reason"],
+  required: ["speak", "utterance", "reason", "tension"],
   additionalProperties: false,
 };
 
@@ -70,7 +71,7 @@ async function decide({ system, user }) {
   if (!res.ok) throw new UpstreamError(res.status, data.error?.message || `HTTP ${res.status}`);
 
   const choice = data.choices?.[0];
-  if (choice?.message?.refusal) return { speak: false, utterance: "", reason: "AIが応答を辞退しました" };
+  if (choice?.message?.refusal) return { speak: false, utterance: "", reason: "AIが応答を辞退しました", tension: 3 };
   const text = choice?.message?.content;
   if (!text) throw new Error(`応答が空でした (finish_reason=${choice?.finish_reason})`);
   return JSON.parse(text);

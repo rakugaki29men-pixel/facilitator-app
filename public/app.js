@@ -1,4 +1,5 @@
-import { loadSettings, renderSettings, ttsInstructions, characterView } from "./settings.js";
+import { loadSettings, saveSettings, renderSettings, ttsInstructions, characterView } from "./settings.js";
+import { targetTension, tensionInfo, clampLevel, browserVoiceFactor } from "./tension.js";
 import { buildSystemPrompt, buildUserMessage } from "./prompt.js";
 import { Listener, speak, stopSpeaking, unlockAudio, isRecognitionSupported } from "./speech.js";
 
@@ -27,6 +28,7 @@ const state = {
   pendingNext: false, // 問い合わせ中に「次へ」が押された
   heard: [], // {at, text}
   aiHistory: [], // {at, text}
+  tension: null, // 最後にしゃべったときのテンション(1〜5)。まだなら null
 };
 
 // ---- 画面の切り替え ----
@@ -38,7 +40,10 @@ function updateView({ settingsOpen = false } = {}) {
   $("#setup-view").classList.toggle("overlay", inStage);
   $("#start").hidden = inStage;
   $("#close-settings").hidden = !inStage;
-  if (inStage && !settingsOpen) renderStage();
+  if (inStage && !settingsOpen) {
+    renderStage();
+    renderTension();
+  }
   window.scrollTo(0, 0);
 }
 
@@ -47,6 +52,30 @@ function renderStage() {
   $("#avatar").textContent = icon;
   $("#char-name").textContent = name;
   $("#event-name").textContent = settings.event.name;
+}
+
+// テンション表示と、幹事用の ▼▲。基準のテンションを会の途中で上下できる
+function renderTension() {
+  const cfg = settings.tension;
+  const level = state.tension ?? clampLevel(cfg.base);
+  $("#tension-text").textContent = `🔥 ${"●".repeat(level)}${"○".repeat(5 - level)}　${tensionInfo(level).label}`;
+  $("#tension-hint").textContent = { swing: "毎回ランダムに急変中", ramp: "だんだん盛り上げ中", ai: "AIおまかせ", steady: "" }[cfg.mode] ?? "";
+  const adjustable = cfg.mode !== "swing";
+  $("#tension-down").disabled = !adjustable || cfg.base <= 1;
+  $("#tension-up").disabled = !adjustable || cfg.base >= 5;
+}
+
+function adjustTension(delta) {
+  settings.tension.base = clampLevel(settings.tension.base + delta);
+  saveSettings(settings);
+  if (settings.tension.mode === "steady") state.tension = null; // 基準がそのまま表示に出る
+  renderSettings($("#settings"), settings, onSettingsChange); // 設定画面のスライダーも合わせる
+  onSettingsChange();
+}
+
+function onSettingsChange() {
+  refreshPromptPreview();
+  if (state.running) renderTension();
 }
 
 function setupMessage(text) {
@@ -174,22 +203,25 @@ const listener = new Listener({
 });
 
 // ---- しゃべる ----
-function voiceOptions() {
+function voiceOptions(level) {
   const a = settings.audio;
+  const f = browserVoiceFactor(level); // ブラウザの声では速さと高さでテンションを表す
   return {
     engine: a.engine,
     voice: a.openaiVoice,
-    instructions: ttsInstructions(settings),
+    instructions: ttsInstructions(settings, level),
     passcode: passcode(),
     voiceURI: a.voiceURI,
-    rate: a.rate,
-    pitch: a.pitch,
+    rate: a.rate * f.rate,
+    pitch: a.pitch * f.pitch,
     onFallback: (err) => log("error", `OpenAIの声が使えないのでブラウザの声で代用します: ${err.message}`),
   };
 }
 
-async function say(text, reason = "") {
+async function say(text, reason = "", level = 3) {
   state.speaking = true;
+  state.tension = level;
+  renderTension();
   listener.pause();
   refreshStatus();
   log("ai", text, reason);
@@ -197,7 +229,7 @@ async function say(text, reason = "") {
   if (state.aiHistory.length > 8) state.aiHistory.shift();
 
   await speak(text, {
-    ...voiceOptions(),
+    ...voiceOptions(level),
     onStart: () => {
       state.talking = true;
       showBubble(text);
@@ -229,6 +261,8 @@ async function check(mode) {
   const recentHeard = state.heard.filter((h) => h.at > state.lastCheckAt);
   const earlierHeard = state.heard.filter((h) => h.at <= state.lastCheckAt && h.at > now - 3 * 60_000).slice(-15);
   state.lastCheckAt = now;
+  const cfg = settings.tension;
+  const target = targetTension(cfg, now - state.startedAt, state.tension);
 
   try {
     const res = await fetch("/api/decide", {
@@ -244,6 +278,7 @@ async function check(mode) {
           startedAt: state.startedAt,
           now,
           silentSec: Math.round((now - state.lastVoiceAt) / 1000),
+          tension: { level: target, label: tensionInfo(target).label, ai: cfg.mode === "ai" },
         }),
       }),
     });
@@ -253,7 +288,9 @@ async function check(mode) {
     if (!state.running) return;
     // 読み上げが終わるまで busy のままにして、発話が重ならないようにする
     if (data.speak && data.utterance.trim()) {
-      await say(data.utterance.trim(), data.reason);
+      // AIおまかせのときだけAIが選んだ値を使う。それ以外は指示したレベルで声を演じさせる
+      const level = cfg.mode === "ai" ? clampLevel(data.tension) : target;
+      await say(data.utterance.trim(), data.reason, level);
     } else {
       log("skip", "（見送り）", data.reason);
     }
@@ -298,6 +335,7 @@ function start() {
   setupMessage("");
   state.running = true;
   state.startedAt = state.lastCheckAt = state.lastVoiceAt = Date.now();
+  state.tension = null;
   unlockAudio(); // 開始ボタンを押した今のうちに、あとからの自動再生を許可してもらう
   keepAwake(true);
   $("#next").disabled = false;
@@ -337,10 +375,13 @@ $("#next").addEventListener("click", () => {
   check("next");
 });
 
+$("#tension-down").addEventListener("click", () => adjustTension(-1));
+$("#tension-up").addEventListener("click", () => adjustTension(1));
+
 $("#voice-test").addEventListener("click", () => {
   unlockAudio();
   const { firstPerson, ending } = settings.speech;
-  speak(`${firstPerson || "わたし"}が今日の司会です。よろしくお願いします${ending ? `、${ending.replace(/^〜/, "")}` : ""}。`, voiceOptions());
+  speak(`${firstPerson || "わたし"}が今日の司会です。よろしくお願いします${ending ? `、${ending.replace(/^〜/, "")}` : ""}。`, voiceOptions(settings.tension.base));
 });
 
 // 手入力で「聞き取った」ことにする（マイクなしでの動作確認用）
@@ -364,7 +405,7 @@ $("#passcode").addEventListener("input", (e) => {
     // 保存できなくても、入力欄の値をそのまま使う
   }
 });
-renderSettings($("#settings"), settings, refreshPromptPreview);
+renderSettings($("#settings"), settings, onSettingsChange);
 refreshPromptPreview();
 refreshStatus();
 updateView();

@@ -24,7 +24,8 @@ const BASE_RULES = `あなたは会社の懇親会の「声だけの司会者」
 - 参加者の名前を呼んで話を振るのは効果的。ただし同じ人ばかりに振らない
 - お酒の場だが、飲酒をすすめたり一気飲みをあおったりしない
 - 下ネタ、容姿・年齢・恋愛・政治宗教・人事評価などのきわどい話題は避ける
-- 自分がAIであることは隠さなくてよい`;
+- 自分がAIであることは隠さなくてよい
+- 発言しないとき（speak=false）の tension は、直前に指定されたレベルをそのまま入れる`;
 
 const MODE_INSTRUCTIONS = {
   start: "【会の開始】今、会が始まりました。キャラクターらしく短く開会のあいさつをして、最初の話題を振ってください。speak=true にすること。",
@@ -55,13 +56,16 @@ function clock(ms) {
  * @param {number} p.now
  * @param {number} p.silentSec  最後に誰かの声を聞き取ってからの秒数
  */
-export function buildUserMessage({ mode, recentHeard, earlierHeard, aiHistory, startedAt, now, silentSec }) {
+export function buildUserMessage({ mode, recentHeard, earlierHeard, aiHistory, startedAt, now, silentSec, tension }) {
   const minutes = Math.floor((now - startedAt) / 60000);
   const lastSpoke = aiHistory.at(-1)?.at;
   const parts = [
     `現在 ${clock(now)}（開始から${minutes}分）`,
     lastSpoke ? `前回のあなたの発言から${Math.round((now - lastSpoke) / 1000)}秒` : "まだ発言していない",
     `最後に誰かの声を聞き取ってから約${silentSec}秒`,
+    tension.ai
+      ? `今回のテンション：基準はレベル${tension.level}。場の空気に合わせて自分で決める`
+      : `今回のテンション：レベル${tension.level}（${tension.label}）で話す`,
   ];
 
   const fmt = (list) => list.map((l) => `[${clock(l.at)}] ${l.text}`).join("\n");

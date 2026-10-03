@@ -6,6 +6,8 @@
 //   render   : (要素, 現在値, 変更通知) => void   設定UIを描画
 //   toPrompt : (値) => string | ""              AIへの指示文に入れる文章（不要なら省略）
 
+import { TENSION_LEVELS, TENSION_MODES, tensionInfo } from "./tension.js";
+
 const STORAGE_KEY = "facilitator-settings-v1";
 
 export const CHARACTER_PRESETS = [
@@ -36,6 +38,9 @@ export const VOICE_TYPES = [
   { label: "おじいちゃん", voice: "ash", style: "高齢の男性。ゆっくり、少ししわがれた温かい声で。", pitch: 0.55, rate: 0.8 },
   { label: "おばあちゃん", voice: "shimmer", style: "高齢の女性。ゆっくり、やさしくおっとりした声で。", pitch: 1.35, rate: 0.8 },
   { label: "子ども", voice: "nova", style: "元気な子どもの声で。高めで無邪気に。", pitch: 1.8, rate: 1.2 },
+  { label: "熱血主人公風", voice: "echo", style: "熱血青春アニメの主人公のように、まっすぐで熱く、叫ぶように。", pitch: 1.1, rate: 1.3 },
+  { label: "ツンデレ風", voice: "nova", style: "素直になれないツンデレ風。きつめに言いつつ、ときどき照れる。", pitch: 1.3, rate: 1.15 },
+  { label: "ミステリアス", voice: "sage", style: "ミステリアスで色気のある語り。声を抑え、含みを持たせてゆっくり。", pitch: 0.8, rate: 0.9 },
   { label: "早口の実況", voice: "echo", style: "スポーツ実況のように、早口で熱く盛り上げる。", pitch: 1.0, rate: 1.6 },
 ];
 
@@ -185,6 +190,45 @@ export const SECTIONS = [
       const preset = CHARACTER_PRESETS.find((p) => p.id === v.preset)?.text || "";
       const text = [preset, v.custom.trim()].filter(Boolean).join("\n");
       return text ? `# あなたのキャラクター\n${text}` : "";
+    },
+  },
+
+  {
+    id: "tension",
+    title: "テンション",
+    defaults: { base: 3, mode: "steady", rampMin: 60 },
+    render(root, value, update) {
+      const set = setter(value, update);
+      const out = el("output", { textContent: `${value.base}　${tensionInfo(value.base).label}` });
+      const slider = el("input", {
+        type: "range", min: 1, max: 5, step: 1, value: value.base,
+        oninput: (e) => { out.textContent = `${e.target.value}　${tensionInfo(e.target.value).label}`; set("base")(Number(e.target.value)); },
+      });
+      const mode = el(
+        "select",
+        { onchange: (e) => set("mode")(e.target.value) },
+        ...TENSION_MODES.map((m) => el("option", { value: m.id, textContent: m.label, selected: m.id === value.mode })),
+      );
+      const rampOut = el("output", { textContent: `${value.rampMin}分` });
+      const ramp = el("input", {
+        type: "range", min: 10, max: 180, step: 10, value: value.rampMin,
+        oninput: (e) => { rampOut.textContent = `${e.target.value}分`; set("rampMin")(Number(e.target.value)); },
+      });
+      root.append(
+        field("基本のテンション（1:とても静か 〜 5:最高潮）", el("div", { className: "range" }, slider, out)),
+        field("テンションの変化のさせかた", mode),
+        field("「だんだん盛り上げる」で最高潮になるまでの時間", el("div", { className: "range" }, ramp, rampOut)),
+      );
+    },
+    toPrompt(v) {
+      const levels = TENSION_LEVELS.map((t) => `  ${t.level}（${t.label}）：${t.say}`).join("\n");
+      const how = {
+        steady: `基本はレベル${v.base}のテンションで一貫して話す。`,
+        ramp: `レベル${v.base}から始めて、時間とともに最高潮に向けてだんだん上げていく。毎回、指示されたレベルに従う。`,
+        swing: "毎回のレベルはこちらが指定する。急に静かになったり爆発したり、前回との落差をわざと大げさに演じて楽しませる。",
+        ai: `基準はレベル${v.base}。場の空気に合わせて1〜5で自分で決める。盛り上がっていれば上げ、しんみりしていれば下げ、たまに急に変えて驚かせてもよい。`,
+      }[v.mode];
+      return `# テンション（1〜5）\n${how}\n${levels}\n返答の tension には、実際に演じたレベルを入れる。`;
     },
   },
 
@@ -367,7 +411,7 @@ export function settingsToPrompt(settings) {
 }
 
 // OpenAIの声への演技指示（声のタイプ + 自由記述 + 司会者のキャラ）
-export function ttsInstructions(settings) {
+export function ttsInstructions(settings, tension) {
   const a = settings.audio;
   const type = VOICE_TYPES.find((t) => t.label === a.voiceType);
   const preset = CHARACTER_PRESETS.find((p) => p.id === settings.character.preset)?.text;
@@ -377,6 +421,7 @@ export function ttsInstructions(settings) {
     type?.style,
     a.voiceStyle.trim(),
     character && `次のキャラクターを演じる：${character}`,
+    tension && `テンションはレベル${tension}/5（${tensionInfo(tension).label}）。${tensionInfo(tension).voice}`,
   ]
     .filter(Boolean)
     .join("\n");
