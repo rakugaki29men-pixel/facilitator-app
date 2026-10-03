@@ -145,3 +145,7 @@ textarea { resize: vertical; }
 }
 
 .passcode { margin-bottom: 12px; }
+.chip.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: bold; }
+.sub { padding-top: 4px; }
+.sub > summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; }
+.sub > .field { margin-top: 10px; }

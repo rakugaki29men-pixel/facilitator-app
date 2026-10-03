@@ -29,6 +29,9 @@ const BASE_RULES = `あなたは会社の懇親会の「声だけの司会者」
 const MODE_INSTRUCTIONS = {
   start: "【会の開始】今、会が始まりました。キャラクターらしく短く開会のあいさつをして、最初の話題を振ってください。speak=true にすること。",
   auto: "上の聞き取り内容を踏まえて、今割り込むべきか判断してください。",
+  silence:
+    "【沈黙が続いています】しばらく誰の声も聞き取れていません。場が静まっているので、司会として必ず発言してください。" +
+    "軽いひとことや、誰かの名前を呼んで答えやすい質問を振るなど、会話のきっかけを作る。speak=true にすること。",
   next: "【幹事が「次へ」を押しました】進行が迷子になっています。必ず発言して、今の流れを軽く締め、新しい話題か簡単なお題に進めてください。speak=true にすること。",
 };
 
@@ -50,13 +53,15 @@ function clock(ms) {
  * @param {{at:number,text:string}[]} p.aiHistory     これまでの自分の発言
  * @param {number} p.startedAt
  * @param {number} p.now
+ * @param {number} p.silentSec  最後に誰かの声を聞き取ってからの秒数
  */
-export function buildUserMessage({ mode, recentHeard, earlierHeard, aiHistory, startedAt, now }) {
+export function buildUserMessage({ mode, recentHeard, earlierHeard, aiHistory, startedAt, now, silentSec }) {
   const minutes = Math.floor((now - startedAt) / 60000);
   const lastSpoke = aiHistory.at(-1)?.at;
   const parts = [
     `現在 ${clock(now)}（開始から${minutes}分）`,
     lastSpoke ? `前回のあなたの発言から${Math.round((now - lastSpoke) / 1000)}秒` : "まだ発言していない",
+    `最後に誰かの声を聞き取ってから約${silentSec}秒`,
   ];
 
   const fmt = (list) => list.map((l) => `[${clock(l.at)}] ${l.text}`).join("\n");

@@ -1,6 +1,6 @@
-import { loadSettings, renderSettings } from "./settings.js";
+import { loadSettings, renderSettings, ttsInstructions } from "./settings.js";
 import { buildSystemPrompt, buildUserMessage } from "./prompt.js";
-import { Listener, speak, isRecognitionSupported } from "./speech.js";
+import { Listener, speak, stopSpeaking, unlockAudio, isRecognitionSupported } from "./speech.js";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -20,6 +20,7 @@ const state = {
   running: false,
   startedAt: 0,
   lastCheckAt: 0, // 前回AIに判断させた時刻。これ以降の聞き取りが「直近」
+  lastVoiceAt: 0, // 最後に誰かの声（途中経過を含む）を聞き取った時刻。沈黙の検知に使う
   busy: false, // AI問い合わせ中
   speaking: false, // 読み上げ中
   pendingNext: false, // 問い合わせ中に「次へ」が押された
@@ -68,12 +69,14 @@ function refreshPromptPreview() {
 const listener = new Listener({
   onFinal(text) {
     if (state.speaking) return;
-    state.heard.push({ at: Date.now(), text });
+    state.lastVoiceAt = Date.now();
+    state.heard.push({ at: state.lastVoiceAt, text });
     if (state.heard.length > 300) state.heard.shift();
     log("heard", text);
   },
   onInterim(text) {
     $("#interim").textContent = text;
+    if (text && !state.speaking) state.lastVoiceAt = Date.now();
   },
   onState(s) {
     if (s.startsWith("error:")) log("error", `音声認識: ${s.slice(6)}`);
@@ -88,6 +91,20 @@ const listener = new Listener({
 });
 
 // ---- しゃべる ----
+function voiceOptions() {
+  const a = settings.audio;
+  return {
+    engine: a.engine,
+    voice: a.openaiVoice,
+    instructions: ttsInstructions(settings),
+    passcode: passcode(),
+    voiceURI: a.voiceURI,
+    rate: a.rate,
+    pitch: a.pitch,
+    onFallback: (err) => log("error", `OpenAIの声が使えないのでブラウザの声で代用します: ${err.message}`),
+  };
+}
+
 async function say(text, reason = "") {
   state.speaking = true;
   listener.pause();
@@ -96,13 +113,13 @@ async function say(text, reason = "") {
   state.aiHistory.push({ at: Date.now(), text });
   if (state.aiHistory.length > 8) state.aiHistory.shift();
 
-  await speak(text, settings.audio);
+  await speak(text, voiceOptions());
   // 残響を拾わないよう少し待ってから聞き取りを再開
   await new Promise((r) => setTimeout(r, 600));
 
   state.speaking = false;
-  // 発言直後にすぐ次の判断をしないよう、タイマーをここから数え直す
-  state.lastCheckAt = Date.now();
+  // 発言直後にすぐ次の判断をしないよう、タイマーをここから数え直す。沈黙の数え直しも同じ
+  state.lastCheckAt = state.lastVoiceAt = Date.now();
   if (state.running) listener.resume();
   refreshStatus();
 }
@@ -127,7 +144,15 @@ async function check(mode) {
       headers: { "Content-Type": "application/json", "X-Passcode": passcode() },
       body: JSON.stringify({
         system: buildSystemPrompt(settings),
-        user: buildUserMessage({ mode, recentHeard, earlierHeard, aiHistory: state.aiHistory, startedAt: state.startedAt, now }),
+        user: buildUserMessage({
+          mode,
+          recentHeard,
+          earlierHeard,
+          aiHistory: state.aiHistory,
+          startedAt: state.startedAt,
+          now,
+          silentSec: Math.round((now - state.lastVoiceAt) / 1000),
+        }),
       }),
     });
     const data = await res.json();
@@ -152,10 +177,19 @@ async function check(mode) {
   }
 }
 
-// 1秒ごとに「判断の時間か」を確認
+// 1秒ごとに「AIに聞く時間か」を確認する。聞くきっかけは2つ：
+//  ・沈黙：誰の声も聞こえない状態が silenceSec 秒続いた → 必ず話題を振らせる
+//  ・定期：前回の判断から intervalSec 秒たった → 割り込むかどうかはAIが決める（見送りもある）
+const MIN_GAP_MS = 10_000; // 沈黙で連続して呼ばないための最短間隔
 setInterval(() => {
   if (!state.running || state.busy || state.speaking) return;
-  if (Date.now() - state.lastCheckAt >= settings.audio.intervalSec * 1000) check("auto");
+  const now = Date.now();
+  const { silenceSec, intervalSec } = settings.audio;
+  if (silenceSec > 0 && now - state.lastVoiceAt >= silenceSec * 1000 && now - state.lastCheckAt >= MIN_GAP_MS) {
+    check("silence");
+  } else if (now - state.lastCheckAt >= intervalSec * 1000) {
+    check("auto");
+  }
 }, 1000);
 
 // ---- ボタン ----
@@ -170,7 +204,8 @@ function start() {
     return;
   }
   state.running = true;
-  state.startedAt = state.lastCheckAt = Date.now();
+  state.startedAt = state.lastCheckAt = state.lastVoiceAt = Date.now();
+  unlockAudio(); // 開始ボタンを押した今のうちに、あとからの自動再生を許可してもらう
   $("#start").hidden = true;
   $("#stop").hidden = false;
   $("#next").disabled = false;
@@ -183,7 +218,7 @@ function stop() {
   state.running = false;
   state.pendingNext = false;
   listener.stop();
-  speechSynthesis.cancel();
+  stopSpeaking();
   $("#start").hidden = false;
   $("#stop").hidden = true;
   $("#next").disabled = true;
@@ -197,13 +232,14 @@ $("#next").addEventListener("click", () => {
   if (!state.running) return;
   log("system", "幹事が「次へ」を押しました");
   // しゃべり中なら打ち切る。読み上げ完了後に pendingNext として処理される
-  if (state.speaking) speechSynthesis.cancel();
+  if (state.speaking) stopSpeaking();
   check("next");
 });
 
 $("#voice-test").addEventListener("click", () => {
+  unlockAudio();
   const { firstPerson, ending } = settings.speech;
-  speak(`${firstPerson || "わたし"}が今日の司会です。よろしくお願いします${ending ? `、${ending.replace(/^〜/, "")}` : ""}。`, settings.audio);
+  speak(`${firstPerson || "わたし"}が今日の司会です。よろしくお願いします${ending ? `、${ending.replace(/^〜/, "")}` : ""}。`, voiceOptions());
 });
 
 // 手入力で「聞き取った」ことにする（マイクなしでの動作確認用）
@@ -212,7 +248,8 @@ $("#manual").addEventListener("submit", (e) => {
   const input = $("#manual-text");
   const text = input.value.trim();
   if (!text) return;
-  state.heard.push({ at: Date.now(), text });
+  state.lastVoiceAt = Date.now();
+  state.heard.push({ at: state.lastVoiceAt, text });
   log("heard", text, "手入力");
   input.value = "";
 });

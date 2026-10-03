@@ -113,10 +113,94 @@ export class Listener {
   }
 }
 
-// 読み上げ。終わったら resolve する。
-export function speak(text, { voiceURI, rate = 1, pitch = 1 } = {}) {
+// ---- 読み上げ ----
+// 声のエンジンは2種類：OpenAIの音声合成(自然・有料) と ブラウザ標準(無料・機械的)。
+// OpenAIの声が失敗したら、会が止まらないようブラウザ標準の声で代わりに読む。
+
+const sharedAudio = new Audio(); // 使い回す。スマホでは一度ユーザー操作で再生許可を取る必要がある
+let current = null; // 実行中の読み上げ { stop() }
+let speakId = 0; // 読み上げの世代。停止したら進めて、古い読み上げが後から鳴らないようにする
+
+// 無音の短いWAV。開始ボタンなどのクリック時に鳴らして、あとからの自動再生を許可してもらう
+const SILENT_WAV = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
+
+export function unlockAudio() {
+  sharedAudio.src = SILENT_WAV;
+  sharedAudio.play().catch(() => {});
+}
+
+export function stopSpeaking() {
+  speakId++;
+  current?.stop();
+  speechSynthesis.cancel();
+}
+
+/**
+ * @param {string} text
+ * @param {object} o
+ * @param {"openai"|"browser"} [o.engine]
+ * @param {string} [o.voice]         OpenAIの声の名前
+ * @param {string} [o.instructions]  OpenAIの声への演技指示
+ * @param {string} [o.passcode]
+ * @param {string} [o.voiceURI] @param {number} [o.rate] @param {number} [o.pitch]  ブラウザの声の設定
+ * @param {(err:Error)=>void} [o.onFallback]
+ */
+export async function speak(text, o = {}) {
+  stopSpeaking();
+  const id = speakId;
+  if (o.engine === "openai") {
+    try {
+      await speakOpenAI(text, o, id);
+      return;
+    } catch (err) {
+      if (id !== speakId) return; // 失敗ではなく、止められただけ
+      o.onFallback?.(err);
+    }
+  }
+  await speakBrowser(text, o);
+}
+
+async function speakOpenAI(text, { voice, instructions, passcode }, id) {
+  const res = await fetch("/api/tts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Passcode": passcode || "" },
+    body: JSON.stringify({ text, voice, instructions }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `HTTP ${res.status}`);
+  }
+  const blob = await res.blob();
+  if (id !== speakId) return; // 取得中に停止された
+
+  const url = URL.createObjectURL(blob);
+  try {
+    await new Promise((resolve, reject) => {
+      const guard = setTimeout(resolve, 60_000); // 終了イベントが来ない場合の保険
+      const finish = (fn) => {
+        clearTimeout(guard);
+        sharedAudio.onended = sharedAudio.onerror = null;
+        current = null;
+        fn();
+      };
+      sharedAudio.onended = () => finish(resolve);
+      sharedAudio.onerror = () => finish(() => reject(new Error("音声を再生できませんでした")));
+      current = {
+        stop() {
+          sharedAudio.pause();
+          finish(resolve);
+        },
+      };
+      sharedAudio.src = url;
+      sharedAudio.play().catch((err) => finish(() => reject(err)));
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function speakBrowser(text, { voiceURI, rate = 1, pitch = 1 }) {
   return new Promise((resolve) => {
-    speechSynthesis.cancel();
     const utter = new SpeechSynthesisUtterance(text);
     utter.lang = "ja-JP";
     utter.rate = rate;
@@ -137,7 +221,7 @@ export function speak(text, { voiceURI, rate = 1, pitch = 1 } = {}) {
     const guard = setTimeout(finish, (text.length * 250) / rate + 4000);
 
     // 参照を保持しないとGCされてイベントが来ない不具合への対策
-    speak.current = utter;
+    speakBrowser.current = utter;
     speechSynthesis.speak(utter);
   });
 }

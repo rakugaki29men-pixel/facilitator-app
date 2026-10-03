@@ -9,6 +9,9 @@ import { fileURLToPath } from "node:url";
 
 const PORT = Number(process.env.PORT || 3000);
 const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+// 読み上げ用の音声合成モデル。instructions(声の演技指示)が使えるのは gpt-4o-mini-tts 系
+const TTS_MODEL = process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts";
+const TTS_VOICES = ["alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"];
 const API_KEY = process.env.OPENAI_API_KEY;
 const API_BASE = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
 const PASSCODE = process.env.FACILITATOR_PASSCODE;
@@ -137,14 +140,58 @@ async function handleDecide(req, res) {
   try {
     sendJson(res, 200, await decide(body));
   } catch (err) {
-    if (err instanceof UpstreamError) {
-      console.error(`OpenAI error ${err.status}: ${err.message}`);
-      if (err.status === 401) return sendJson(res, 500, { error: "OpenAIのAPIキーが無効です（OPENAI_API_KEY を確認）" });
-      if (err.status === 429) return sendJson(res, 429, { error: "OpenAIの利用制限に達しました（残高・上限額を確認）" });
-      return sendJson(res, 502, { error: `OpenAIエラー: ${err.status} ${err.message}` });
+    sendError(res, err);
+  }
+}
+
+function sendError(res, err) {
+  if (err instanceof UpstreamError) {
+    console.error(`OpenAI error ${err.status}: ${err.message}`);
+    if (err.status === 401) return sendJson(res, 500, { error: "OpenAIのAPIキーが無効です（OPENAI_API_KEY を確認）" });
+    if (err.status === 429) return sendJson(res, 429, { error: "OpenAIの利用制限に達しました（残高・上限額を確認）" });
+    return sendJson(res, 502, { error: `OpenAIエラー: ${err.status} ${err.message}` });
+  }
+  console.error(err);
+  sendJson(res, 500, { error: String(err.message || err) });
+}
+
+// テキスト → 音声(mp3)。OpenAIの音声合成で、ブラウザ標準よりずっと自然な声になる。
+async function handleTts(req, res) {
+  const denied = checkAuth(req);
+  if (denied) return sendJson(res, denied.status, { error: denied.error });
+
+  let body;
+  try {
+    body = await readBody(req);
+  } catch {
+    return sendJson(res, 400, { error: "リクエストが不正です" });
+  }
+  const { text, voice = "coral", instructions = "" } = body;
+  if (typeof text !== "string" || !text.trim() || text.length > 600) {
+    return sendJson(res, 400, { error: "text は1〜600文字で指定してください" });
+  }
+  if (!TTS_VOICES.includes(voice)) return sendJson(res, 400, { error: "voice が不正です" });
+
+  const payload = { model: TTS_MODEL, input: text, voice, response_format: "mp3" };
+  if (typeof instructions === "string" && instructions.trim() && TTS_MODEL.startsWith("gpt-4o")) {
+    payload.instructions = instructions.slice(0, 1500);
+  }
+  try {
+    const upstream = await fetch(`${API_BASE}/audio/speech`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${API_KEY}` },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!upstream.ok) {
+      const data = await upstream.json().catch(() => ({}));
+      throw new UpstreamError(upstream.status, data.error?.message || `HTTP ${upstream.status}`);
     }
-    console.error(err);
-    sendJson(res, 500, { error: String(err.message || err) });
+    const audio = Buffer.from(await upstream.arrayBuffer());
+    res.writeHead(200, { "Content-Type": "audio/mpeg", "Content-Length": audio.length, "Cache-Control": "no-store" });
+    res.end(audio);
+  } catch (err) {
+    sendError(res, err);
   }
 }
 
@@ -174,9 +221,10 @@ if (missing.length) {
 http
   .createServer((req, res) => {
     if (req.method === "POST" && req.url === "/api/decide") return handleDecide(req, res);
+    if (req.method === "POST" && req.url === "/api/tts") return handleTts(req, res);
     if (req.method === "GET") return serveStatic(req, res);
     res.writeHead(405).end();
   })
   .listen(PORT, () => {
-    console.log(`ファシリテーター起動: http://localhost:${PORT}  (model=${MODEL})`);
+    console.log(`ファシリテーター起動: http://localhost:${PORT}  (model=${MODEL}, tts=${TTS_MODEL})`);
   });
