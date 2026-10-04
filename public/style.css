@@ -122,8 +122,8 @@ textarea { resize: vertical; }
 .chip { padding: 4px 12px; border-radius: 999px; font-size: 0.9rem; }
 
 .range { display: flex; align-items: center; gap: 8px; }
-.range input { flex: 1; }
-.range output { width: 3em; text-align: right; font-variant-numeric: tabular-nums; }
+.range input { flex: 1; min-width: 80px; }
+.range output { min-width: 3em; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 #voice-test { margin-top: 8px; }
 
@@ -258,3 +258,9 @@ textarea { resize: vertical; }
 .stage-log summary { cursor: pointer; opacity: 0.7; padding: 8px 0; }
 .stage-log .manual input { background: rgba(255, 255, 255, 0.92); }
 #stage .log { max-height: 40vh; }
+
+/* 参加者ごとの詳細設定 */
+.participant-card { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.participant-card .sub { margin-top: 4px; }
+.participant-card .sub[open] { padding-bottom: 4px; }
+#laugh-test { margin-top: 4px; }

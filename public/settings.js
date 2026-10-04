@@ -7,6 +7,8 @@
 //   toPrompt : (値) => string | ""              AIへの指示文に入れる文章（不要なら省略）
 
 import { TENSION_LEVELS, TENSION_MODES, tensionInfo } from "./tension.js";
+import { FREQUENCIES, freqInfo, splitList } from "./pokes.js";
+import { LAUGH_LEVELS, laughInfo } from "./laugh.js";
 
 const STORAGE_KEY = "facilitator-settings-v1";
 
@@ -113,27 +115,63 @@ export const SECTIONS = [
       const list = el("div", { className: "participant-list" });
       const commit = () => update(value);
 
+      // 追加項目がない古い保存データも読めるようにそろえる
+      for (const p of value.list) {
+        p.topics ??= "";
+        p.pokes ??= "";
+        p.ng ??= "";
+        p.freq ??= 2;
+      }
+      const summaryText = (p) => {
+        const n = splitList(p.topics).length + splitList(p.pokes).length;
+        return n || p.ng.trim() ? `話題・ツッコミ設定（話題とネタ${n}件${p.ng.trim() ? "・NGあり" : ""}）` : "話題・ツッコミ設定";
+      };
+
       const draw = () => {
         list.replaceChildren();
         if (value.list.length === 0) list.append(el("p", { className: "hint" }, "まだ誰もいません。下から追加してください。"));
         value.list.forEach((p, i) => {
+          const summary = el("summary", {}, summaryText(p));
+          const edit = (key) => (v) => {
+            p[key] = v;
+            summary.textContent = summaryText(p);
+            commit();
+          };
+          const freq = el(
+            "select",
+            { onchange: (e) => edit("freq")(Number(e.target.value)) },
+            ...FREQUENCIES.map((f) => el("option", { value: f.level, textContent: f.label, selected: f.level === Number(p.freq) })),
+          );
           list.append(
             el(
               "div",
-              { className: "participant-row" },
-              textInput(p.name, (v) => ((p.name = v), commit()), "名前"),
-              textInput(p.memo, (v) => ((p.memo = v), commit()), "ひとことメモ（例：カラオケ好き）"),
-              el("button", {
-                type: "button",
-                className: "icon-btn",
-                title: "削除",
-                textContent: "✕",
-                onclick: () => {
-                  value.list.splice(i, 1);
-                  commit();
-                  draw();
-                },
-              }),
+              { className: "participant-card" },
+              el(
+                "div",
+                { className: "participant-row" },
+                textInput(p.name, edit("name"), "名前"),
+                textInput(p.memo, edit("memo"), "ひとことメモ（例：カラオケ好き）"),
+                el("button", {
+                  type: "button",
+                  className: "icon-btn",
+                  title: "削除",
+                  textContent: "✕",
+                  onclick: () => {
+                    value.list.splice(i, 1);
+                    commit();
+                    draw();
+                  },
+                }),
+              ),
+              el(
+                "details",
+                { className: "sub" },
+                summary,
+                field("振りたい話題（「、」で区切る）", textInput(p.topics, edit("topics"), "例：週末のゴルフ、最近ハマっているもの")),
+                field("ツッコミワード（「、」で区切る）", textInput(p.pokes, edit("pokes"), "例：また遅刻、寝ぐせ、それ前も聞いた")),
+                field("触れてはいけない話題（NG）", textInput(p.ng, edit("ng"), "例：年齢、お酒を飲めない理由")),
+                field("話題・ツッコミで絡む頻度（毎回くじ引きします）", freq),
+              ),
             ),
           );
         });
@@ -144,7 +182,7 @@ export const SECTIONS = [
       const add = () => {
         const name = nameIn.value.trim();
         if (!name) return nameIn.focus();
-        value.list.push({ id: newId(), name, memo: memoIn.value.trim() });
+        value.list.push({ id: newId(), name, memo: memoIn.value.trim(), topics: "", pokes: "", ng: "", freq: 2 });
         nameIn.value = memoIn.value = "";
         commit();
         draw();
@@ -164,8 +202,18 @@ export const SECTIONS = [
     toPrompt(v) {
       const people = v.list.filter((p) => p.name.trim());
       if (!people.length) return "";
-      const lines = people.map((p) => `- ${p.name}${p.memo ? `：${p.memo}` : ""}`);
-      return `# 参加者（${people.length}人）\n${lines.join("\n")}\n※聞き取った名前が多少違っても、近い名前ならこの人たちのことだと推測してよい。`;
+      const lines = people.map((p) => {
+        const ng = splitList(p.ng);
+        return [`- ${p.name}${p.memo ? `：${p.memo}` : ""}`, ng.length && `  - 触れてはいけない話題（絶対に話題にしない）：${ng.join("、")}`]
+          .filter(Boolean)
+          .join("\n");
+      });
+      return [
+        `# 参加者（${people.length}人）`,
+        lines.join("\n"),
+        "※聞き取った名前が多少違っても、近い名前ならこの人たちのことだと推測してよい。",
+        "※各人の「振りたい話題」「ツッコミワード」は、頻度の設定にもとづいて毎回こちらで抽選し、「今回絡む相手とネタ」として渡す。渡されたものだけを使い、渡されていない人のネタを勝手に持ち出さない。",
+      ].join("\n");
     },
   },
 
@@ -229,6 +277,33 @@ export const SECTIONS = [
         ai: `基準はレベル${v.base}。場の空気に合わせて1〜5で自分で決める。盛り上がっていれば上げ、しんみりしていれば下げ、たまに急に変えて驚かせてもよい。`,
       }[v.mode];
       return `# テンション（1〜5）\n${how}\n${levels}\n返答の tension には、実際に演じたレベルを入れる。`;
+    },
+  },
+
+  {
+    id: "laugh",
+    title: "笑い上戸",
+    defaults: { level: 1 },
+    render(root, value, update) {
+      const set = setter(value, update);
+      const out = el("output", { textContent: `${value.level}　${laughInfo(value.level).label}` });
+      const slider = el("input", {
+        type: "range", min: 0, max: 4, step: 1, value: value.level,
+        oninput: (e) => { out.textContent = `${e.target.value}　${laughInfo(e.target.value).label}`; set("level")(Number(e.target.value)); },
+      });
+      root.append(
+        field("笑いやすさ（0:笑わない 〜 4:笑いが止まらない）", el("div", { className: "range" }, slider, out)),
+        el("button", { type: "button", id: "laugh-test", textContent: "😂 笑いのテスト" }),
+      );
+    },
+    toPrompt(v) {
+      if (v.level <= 0) return "# 笑い\n笑い声は入れない。";
+      return [
+        "# 笑い",
+        `笑いやすさはレベル${v.level}（${laughInfo(v.level).label}）：${laughInfo(v.level).say}`,
+        "笑うかどうかは毎回こちらで抽選して指示する。「笑いを入れる」と指示されたときだけ、セリフに笑い声を入れる。",
+        "笑い声は、ひらがなで「あはははは！」「ふふっ」「ひーっ、くくく」のように書く（文字数の目安には含めない）。参加者の発言や聞き間違いがおもしろいときに、それを受けて笑う。",
+      ].join("\n");
     },
   },
 
@@ -411,7 +486,7 @@ export function settingsToPrompt(settings) {
 }
 
 // OpenAIの声への演技指示（声のタイプ + 自由記述 + 司会者のキャラ）
-export function ttsInstructions(settings, tension) {
+export function ttsInstructions(settings, { tension, laugh } = {}) {
   const a = settings.audio;
   const type = VOICE_TYPES.find((t) => t.label === a.voiceType);
   const preset = CHARACTER_PRESETS.find((p) => p.id === settings.character.preset)?.text;
@@ -422,6 +497,7 @@ export function ttsInstructions(settings, tension) {
     a.voiceStyle.trim(),
     character && `次のキャラクターを演じる：${character}`,
     tension && `テンションはレベル${tension}/5（${tensionInfo(tension).label}）。${tensionInfo(tension).voice}`,
+    laugh && `笑い声（「はは」「あはは」など）の部分は、棒読みせず、本当に笑っているように息を弾ませて演じる。笑いの度合い：${laughInfo(settings.laugh.level).label}。`,
   ]
     .filter(Boolean)
     .join("\n");

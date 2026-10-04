@@ -1,5 +1,7 @@
 import { loadSettings, saveSettings, renderSettings, ttsInstructions, characterView } from "./settings.js";
 import { targetTension, tensionInfo, clampLevel, browserVoiceFactor } from "./tension.js";
+import { drawTargets } from "./pokes.js";
+import { drawLaugh, laughInfo } from "./laugh.js";
 import { buildSystemPrompt, buildUserMessage } from "./prompt.js";
 import { Listener, speak, stopSpeaking, unlockAudio, isRecognitionSupported } from "./speech.js";
 
@@ -29,6 +31,7 @@ const state = {
   heard: [], // {at, text}
   aiHistory: [], // {at, text}
   tension: null, // 最後にしゃべったときのテンション(1〜5)。まだなら null
+  lastTargets: [], // 前回のセリフで絡んだ人の名前（連続して絡まないための記録）
 };
 
 // ---- 画面の切り替え ----
@@ -203,13 +206,13 @@ const listener = new Listener({
 });
 
 // ---- しゃべる ----
-function voiceOptions(level) {
+function voiceOptions({ tension, laugh = false }) {
   const a = settings.audio;
-  const f = browserVoiceFactor(level); // ブラウザの声では速さと高さでテンションを表す
+  const f = browserVoiceFactor(tension); // ブラウザの声では速さと高さでテンションを表す
   return {
     engine: a.engine,
     voice: a.openaiVoice,
-    instructions: ttsInstructions(settings, level),
+    instructions: ttsInstructions(settings, { tension, laugh }),
     passcode: passcode(),
     voiceURI: a.voiceURI,
     rate: a.rate * f.rate,
@@ -218,9 +221,10 @@ function voiceOptions(level) {
   };
 }
 
-async function say(text, reason = "", level = 3) {
+async function say(text, reason, { tension, laugh, names }) {
   state.speaking = true;
-  state.tension = level;
+  state.tension = tension;
+  state.lastTargets = names; // 絡んだ人。次の抽選で1回休みにする
   renderTension();
   listener.pause();
   refreshStatus();
@@ -229,7 +233,7 @@ async function say(text, reason = "", level = 3) {
   if (state.aiHistory.length > 8) state.aiHistory.shift();
 
   await speak(text, {
-    ...voiceOptions(level),
+    ...voiceOptions({ tension, laugh }),
     onStart: () => {
       state.talking = true;
       showBubble(text);
@@ -263,6 +267,9 @@ async function check(mode) {
   state.lastCheckAt = now;
   const cfg = settings.tension;
   const target = targetTension(cfg, now - state.startedAt, state.tension);
+  // 頻度の設定にもとづく抽選：今回絡む相手とネタ、笑いを入れるか
+  const targets = drawTargets(settings.participants.list, { lastNames: state.lastTargets });
+  const laughOn = drawLaugh(settings.laugh.level);
 
   try {
     const res = await fetch("/api/decide", {
@@ -279,6 +286,8 @@ async function check(mode) {
           now,
           silentSec: Math.round((now - state.lastVoiceAt) / 1000),
           tension: { level: target, label: tensionInfo(target).label, ai: cfg.mode === "ai" },
+          laugh: { on: laughOn, ...laughInfo(settings.laugh.level) },
+          targets,
         }),
       }),
     });
@@ -290,7 +299,7 @@ async function check(mode) {
     if (data.speak && data.utterance.trim()) {
       // AIおまかせのときだけAIが選んだ値を使う。それ以外は指示したレベルで声を演じさせる
       const level = cfg.mode === "ai" ? clampLevel(data.tension) : target;
-      await say(data.utterance.trim(), data.reason, level);
+      await say(data.utterance.trim(), data.reason, { tension: level, laugh: laughOn, names: targets.map((t) => t.name) });
     } else {
       log("skip", "（見送り）", data.reason);
     }
@@ -375,13 +384,20 @@ $("#next").addEventListener("click", () => {
   check("next");
 });
 
+// 笑いのテストボタンは設定画面の描画時に作られる（描画し直しもある）ので、親で受ける
+$("#settings").addEventListener("click", (e) => {
+  if (!e.target.closest("#laugh-test")) return;
+  unlockAudio();
+  speak("あはははは！ちょっと待って、ふふっ、おもしろすぎるでしょ！あーっはっはっは！", voiceOptions({ tension: Math.max(3, settings.tension.base), laugh: true }));
+});
+
 $("#tension-down").addEventListener("click", () => adjustTension(-1));
 $("#tension-up").addEventListener("click", () => adjustTension(1));
 
 $("#voice-test").addEventListener("click", () => {
   unlockAudio();
   const { firstPerson, ending } = settings.speech;
-  speak(`${firstPerson || "わたし"}が今日の司会です。よろしくお願いします${ending ? `、${ending.replace(/^〜/, "")}` : ""}。`, voiceOptions(settings.tension.base));
+  speak(`${firstPerson || "わたし"}が今日の司会です。よろしくお願いします${ending ? `、${ending.replace(/^〜/, "")}` : ""}。`, voiceOptions({ tension: settings.tension.base }));
 });
 
 // 手入力で「聞き取った」ことにする（マイクなしでの動作確認用）
