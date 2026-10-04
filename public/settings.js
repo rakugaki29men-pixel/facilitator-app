@@ -284,7 +284,7 @@ export const SECTIONS = [
   {
     id: "rules",
     title: "話の振り方・締めの芸",
-    defaults: { maxAsks: 3, song: true, rap: true, gag: true },
+    defaults: { maxAsks: 3, rap: true, gag: true },
     render(root, value, update) {
       const set = setter(value, update);
       const out = el("output", { textContent: `${value.maxAsks}回` });
@@ -298,7 +298,7 @@ export const SECTIONS = [
           `${PERF_TYPES[key].icon} ${PERF_TYPES[key].label}`);
       root.append(
         field("同じ人に連続で振れる回数の上限（深掘りできるのはこの回数まで）", el("div", { className: "range" }, slider, out)),
-        field("上限の回の締めにやる芸（チェックしたものからランダム）", el("div", { className: "checks" }, check("song"), check("rap"), check("gag"))),
+        field("上限の回の締めにやる芸（チェックしたものからランダム）", el("div", { className: "checks" }, check("rap"), check("gag"))),
         el("p", { className: "hint" }, "全員への質問はせず、必ず1人を名指しして振ります。一発ギャグのあとは自分で長めに爆笑します。芸をすべてオフにすると、上限だけ守って締めの芸はしません。"),
       );
     },
