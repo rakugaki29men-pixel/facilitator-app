@@ -20,7 +20,7 @@ const BASE_RULES = `あなたは会社の懇親会の「声だけの司会者」
 - ただし聞き間違いを事実として扱って誰かを責めたり、からかいすぎたりしない
 
 # 発言のルール
-- 読み上げられるので、1〜2文・60文字程度まで。記号・絵文字・顔文字・英字略語は使わない
+- 読み上げられるので、1〜2文・60文字程度まで（芸と笑い声は別）。記号・絵文字・顔文字・英字略語は使わない
 - 参加者の名前を呼んで話を振るのは効果的。ただし同じ人ばかりに振らない
 - お酒の場だが、飲酒をすすめたり一気飲みをあおったりしない
 - 下ネタ、容姿・年齢・恋愛・政治宗教・人事評価などのきわどい話題は避ける
@@ -29,7 +29,7 @@ const BASE_RULES = `あなたは会社の懇親会の「声だけの司会者」
 - 発言しないとき（speak=false）の tension は、直前に指定されたレベルをそのまま入れる`;
 
 const MODE_INSTRUCTIONS = {
-  start: "【会の開始】今、会が始まりました。キャラクターらしく短く開会のあいさつをして、最初の話題を振ってください。speak=true にすること。",
+  start: "【会の開始】今、会が始まりました。キャラクターらしく短く開会のあいさつをして、参加者の誰か1人を名指しして最初の話題を振ってください。speak=true にすること。",
   auto: "上の聞き取り内容を踏まえて、今割り込むべきか判断してください。",
   silence:
     "【沈黙が続いています】しばらく誰の声も聞き取れていません。場が静まっているので、司会として必ず発言してください。" +
@@ -56,8 +56,12 @@ function clock(ms) {
  * @param {number} p.startedAt
  * @param {number} p.now
  * @param {number} p.silentSec  最後に誰かの声を聞き取ってからの秒数
+ * @param {{level:number,label:string,ai:boolean}} p.tension  今回のテンション
+ * @param {{on:boolean,label:string,say:string}} p.laugh  今回笑いを入れるか
+ * @param {{name:string,kind:string,text:string}[]} p.targets  今回絡む相手とネタ
+ * @param {string} p.flow  今回の進行（話の振り方）の指示文
  */
-export function buildUserMessage({ mode, recentHeard, earlierHeard, aiHistory, startedAt, now, silentSec, tension, laugh, targets }) {
+export function buildUserMessage({ mode, recentHeard, earlierHeard, aiHistory, startedAt, now, silentSec, tension, laugh, targets, flow }) {
   const minutes = Math.floor((now - startedAt) / 60000);
   const lastSpoke = aiHistory.at(-1)?.at;
   const parts = [
@@ -78,6 +82,8 @@ export function buildUserMessage({ mode, recentHeard, earlierHeard, aiHistory, s
       `## 今回絡む相手とネタ（頻度の設定にもとづく抽選結果）\n${lines.join("\n")}\n会話の流れに合うなら自然に使う。合わなければ無理に使わなくてよい。`,
     );
   }
+
+  parts.push(flow);
 
   const fmt = (list) => list.map((l) => `[${clock(l.at)}] ${l.text}`).join("\n");
 

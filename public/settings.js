@@ -9,6 +9,7 @@
 import { TENSION_LEVELS, TENSION_MODES, tensionInfo } from "./tension.js";
 import { FREQUENCIES, freqInfo, splitList } from "./pokes.js";
 import { LAUGH_LEVELS, laughInfo } from "./laugh.js";
+import { PERF_TYPES, LAUGH_AFTER_VOICE } from "./flow.js";
 
 const STORAGE_KEY = "facilitator-settings-v1";
 
@@ -281,6 +282,42 @@ export const SECTIONS = [
   },
 
   {
+    id: "rules",
+    title: "話の振り方・締めの芸",
+    defaults: { maxAsks: 3, song: true, rap: true, gag: true },
+    render(root, value, update) {
+      const set = setter(value, update);
+      const out = el("output", { textContent: `${value.maxAsks}回` });
+      const slider = el("input", {
+        type: "range", min: 1, max: 10, step: 1, value: value.maxAsks,
+        oninput: (e) => { out.textContent = `${e.target.value}回`; set("maxAsks")(Number(e.target.value)); },
+      });
+      const check = (key) =>
+        el("label", { className: "check" },
+          el("input", { type: "checkbox", checked: value[key], onchange: (e) => set(key)(e.target.checked) }),
+          `${PERF_TYPES[key].icon} ${PERF_TYPES[key].label}`);
+      root.append(
+        field("同じ人に連続で振れる回数の上限（深掘りできるのはこの回数まで）", el("div", { className: "range" }, slider, out)),
+        field("上限の回の締めにやる芸（チェックしたものからランダム）", el("div", { className: "checks" }, check("song"), check("rap"), check("gag"))),
+        el("p", { className: "hint" }, "全員への質問はせず、必ず1人を名指しして振ります。一発ギャグのあとは自分で長めに爆笑します。芸をすべてオフにすると、上限だけ守って締めの芸はしません。"),
+      );
+    },
+    toPrompt(v) {
+      const types = Object.keys(PERF_TYPES).filter((k) => v[k]).map((k) => PERF_TYPES[k].label);
+      return [
+        "# 話の振り方のルール",
+        "- 「みなさんは」など全員に向けた質問はしない。必ず参加者の誰か1人を名前で呼んで話を振る（参加者リストが空のときだけ例外）",
+        "- 相手の話が深掘りできそうなら、続けて同じ人に聞いてよい。深掘りできなさそうなら、早めに別の人へ移る",
+        `- 同じ人に連続で振れるのは最大${v.maxAsks}回まで。回数はこちらで数えて、毎回「今回の進行」として指示する`,
+        types.length
+          ? `- 上限の回には、その人との会話の内容を反映した5〜10秒ほどの芸（${types.length > 1 ? `${types.join("・")}のどれか。こちらが指定する` : types[0]}）で締める。一発ギャグのあとは、自分で長めに爆笑する`
+          : "- 締めの芸はしない",
+        "- 返答の target に振った相手の名前、performance に締めの芸、laugh_after にギャグのあとの爆笑を入れる。指示がない回は performance と laugh_after を空文字にする",
+      ].join("\n");
+    },
+  },
+
+  {
     id: "laugh",
     title: "笑い上戸",
     defaults: { level: 1 },
@@ -486,7 +523,7 @@ export function settingsToPrompt(settings) {
 }
 
 // OpenAIの声への演技指示（声のタイプ + 自由記述 + 司会者のキャラ）
-export function ttsInstructions(settings, { tension, laugh } = {}) {
+export function ttsInstructions(settings, { tension, laugh, segment, perfType } = {}) {
   const a = settings.audio;
   const type = VOICE_TYPES.find((t) => t.label === a.voiceType);
   const preset = CHARACTER_PRESETS.find((p) => p.id === settings.character.preset)?.text;
@@ -498,6 +535,8 @@ export function ttsInstructions(settings, { tension, laugh } = {}) {
     character && `次のキャラクターを演じる：${character}`,
     tension && `テンションはレベル${tension}/5（${tensionInfo(tension).label}）。${tensionInfo(tension).voice}`,
     laugh && `笑い声（「はは」「あはは」など）の部分は、棒読みせず、本当に笑っているように息を弾ませて演じる。笑いの度合い：${laughInfo(settings.laugh.level).label}。`,
+    segment === "perform" && PERF_TYPES[perfType]?.voice,
+    segment === "laugh" && LAUGH_AFTER_VOICE,
   ]
     .filter(Boolean)
     .join("\n");

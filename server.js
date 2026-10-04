@@ -34,8 +34,11 @@ const DECISION_SCHEMA = {
     utterance: { type: "string", description: "読み上げるセリフ。speak=false なら空文字" },
     reason: { type: "string", description: "判断理由（幹事向けの短いメモ。読み上げない）" },
     tension: { type: "integer", enum: [1, 2, 3, 4, 5], description: "実際に演じたテンションのレベル（1:とても静か〜5:最高潮）" },
+    target: { type: "string", description: "話を振った参加者の名前（参加者リストのとおり）。誰にも振らない場合は空文字" },
+    performance: { type: "string", description: "締めの芸（歌・ラップ・一発ギャグ）の本文。指示がない回は空文字" },
+    laugh_after: { type: "string", description: "一発ギャグのあとの長めの爆笑。指示がない回は空文字" },
   },
-  required: ["speak", "utterance", "reason", "tension"],
+  required: ["speak", "utterance", "reason", "tension", "target", "performance", "laugh_after"],
   additionalProperties: false,
 };
 
@@ -71,7 +74,7 @@ async function decide({ system, user }) {
   if (!res.ok) throw new UpstreamError(res.status, data.error?.message || `HTTP ${res.status}`);
 
   const choice = data.choices?.[0];
-  if (choice?.message?.refusal) return { speak: false, utterance: "", reason: "AIが応答を辞退しました", tension: 3 };
+  if (choice?.message?.refusal) return { speak: false, utterance: "", reason: "AIが応答を辞退しました", tension: 3, target: "", performance: "", laugh_after: "" };
   const text = choice?.message?.content;
   if (!text) throw new Error(`応答が空でした (finish_reason=${choice?.finish_reason})`);
   return JSON.parse(text);

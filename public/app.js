@@ -2,6 +2,7 @@ import { loadSettings, saveSettings, renderSettings, ttsInstructions, characterV
 import { targetTension, tensionInfo, clampLevel, browserVoiceFactor } from "./tension.js";
 import { drawTargets } from "./pokes.js";
 import { drawLaugh, laughInfo } from "./laugh.js";
+import { planTurn, applyTurn, matchParticipant, enabledPerfTypes, PERF_TYPES, DEFAULT_LAUGH_AFTER } from "./flow.js";
 import { buildSystemPrompt, buildUserMessage } from "./prompt.js";
 import { Listener, speak, stopSpeaking, unlockAudio, isRecognitionSupported } from "./speech.js";
 
@@ -32,6 +33,9 @@ const state = {
   aiHistory: [], // {at, text}
   tension: null, // 最後にしゃべったときのテンション(1〜5)。まだなら null
   lastTargets: [], // 前回のセリフで絡んだ人の名前（連続して絡まないための記録）
+  focus: null, // 深掘り中の相手 { name, count }。同じ人に連続で振った回数
+  cooldown: null, // 上限まで振ったので、次は振れない人の名前
+  sayToken: 0, // 発話の世代。「次へ」「停止」で進めて、途中の発話の続きを止める
 };
 
 // ---- 画面の切り替え ----
@@ -51,6 +55,7 @@ function updateView({ settingsOpen = false } = {}) {
 }
 
 function renderStage() {
+  renderFocus();
   const { icon, name } = characterView(settings);
   $("#avatar").textContent = icon;
   $("#char-name").textContent = name;
@@ -78,7 +83,21 @@ function adjustTension(delta) {
 
 function onSettingsChange() {
   refreshPromptPreview();
-  if (state.running) renderTension();
+  if (state.running) {
+    renderTension();
+    renderFocus();
+  }
+}
+
+// 今だれと話しているか（深掘り中の相手と回数）
+function renderFocus() {
+  const f = state.focus;
+  const max = settings.rules.maxAsks;
+  $("#focus-text").textContent = f
+    ? `💬 ${f.name}さんとお話し中（${f.count}/${max}回）`
+    : state.cooldown
+      ? `🔄 次は${state.cooldown}さん以外へ`
+      : "";
 }
 
 function setupMessage(text) {
@@ -206,13 +225,13 @@ const listener = new Listener({
 });
 
 // ---- しゃべる ----
-function voiceOptions({ tension, laugh = false }) {
+function voiceOptions({ tension, laugh = false, segment, perfType }) {
   const a = settings.audio;
   const f = browserVoiceFactor(tension); // ブラウザの声では速さと高さでテンションを表す
   return {
     engine: a.engine,
     voice: a.openaiVoice,
-    instructions: ttsInstructions(settings, { tension, laugh }),
+    instructions: ttsInstructions(settings, { tension, laugh, segment, perfType }),
     passcode: passcode(),
     voiceURI: a.voiceURI,
     rate: a.rate * f.rate,
@@ -221,26 +240,40 @@ function voiceOptions({ tension, laugh = false }) {
   };
 }
 
-async function say(text, reason, { tension, laugh, names }) {
+// セリフ → （上限の回なら）締めの芸 → （一発ギャグなら）爆笑、を順に読み上げる
+async function say(segments, reason, { tension, laugh, names }) {
+  const token = ++state.sayToken;
+  const whole = segments.map((seg) => seg.text).join(" ");
   state.speaking = true;
   state.tension = tension;
   state.lastTargets = names; // 絡んだ人。次の抽選で1回休みにする
   renderTension();
   listener.pause();
   refreshStatus();
-  log("ai", text, reason);
-  state.aiHistory.push({ at: Date.now(), text });
+  log("ai", whole, reason);
+  state.aiHistory.push({ at: Date.now(), text: whole });
   if (state.aiHistory.length > 8) state.aiHistory.shift();
 
-  await speak(text, {
-    ...voiceOptions({ tension, laugh }),
-    onStart: () => {
-      state.talking = true;
-      showBubble(text);
-      refreshStatus();
-    },
-  });
-  settleBubble(text);
+  for (const seg of segments) {
+    if (token !== state.sayToken) break; // 「次へ」「停止」で打ち切られた
+    const talk = seg.kind === "talk";
+    const icon = seg.kind === "perform" ? `${PERF_TYPES[seg.type].icon} ` : seg.kind === "laugh" ? "🤣 " : "";
+    const shown = icon + seg.text;
+    await speak(seg.text, {
+      ...voiceOptions({
+        tension: talk ? tension : Math.max(tension, 4), // 芸と爆笑は高めのテンションで
+        laugh: talk && laugh,
+        segment: seg.kind,
+        perfType: seg.type,
+      }),
+      onStart: () => {
+        state.talking = true;
+        showBubble(shown);
+        refreshStatus();
+      },
+    });
+    settleBubble(shown);
+  }
   // 残響を拾わないよう少し待ってから聞き取りを再開
   await new Promise((r) => setTimeout(r, 600));
 
@@ -250,6 +283,12 @@ async function say(text, reason, { tension, laugh, names }) {
   state.lastCheckAt = state.lastVoiceAt = Date.now();
   if (state.running) listener.resume();
   refreshStatus();
+}
+
+// しゃべっている途中でも打ち切る（「次へ」「停止」用）
+function cancelSay() {
+  state.sayToken++;
+  stopSpeaking();
 }
 
 // ---- AIに判断させる ----
@@ -267,8 +306,19 @@ async function check(mode) {
   state.lastCheckAt = now;
   const cfg = settings.tension;
   const target = targetTension(cfg, now - state.startedAt, state.tension);
-  // 頻度の設定にもとづく抽選：今回絡む相手とネタ、笑いを入れるか
-  const targets = drawTargets(settings.participants.list, { lastNames: state.lastTargets });
+  // 「次へ」は深掘りを打ち切る。いまの相手には、すぐには振り直さない
+  if (mode === "next" && state.focus) {
+    state.cooldown = state.focus.name;
+    state.focus = null;
+    renderFocus();
+  }
+  // 誰に・どう振るか（深掘りの回数、上限の回の締めの芸）
+  const rules = settings.rules;
+  const names = settings.participants.list.map((p) => p.name.trim()).filter(Boolean);
+  const plan = planTurn({ focus: state.focus, cooldown: state.cooldown, maxAsks: rules.maxAsks, perfTypes: enabledPerfTypes(rules), hasNames: names.length > 0 });
+  // 頻度の設定にもとづく抽選：今回絡む相手とネタ、笑いを入れるか。締めの回は芸に集中するのでネタは使わない
+  const candidates = settings.participants.list.filter((p) => p.name.trim() !== state.cooldown);
+  const targets = plan.perfType ? [] : drawTargets(candidates, { lastNames: state.lastTargets });
   const laughOn = drawLaugh(settings.laugh.level);
 
   try {
@@ -288,6 +338,7 @@ async function check(mode) {
           tension: { level: target, label: tensionInfo(target).label, ai: cfg.mode === "ai" },
           laugh: { on: laughOn, ...laughInfo(settings.laugh.level) },
           targets,
+          flow: plan.text,
         }),
       }),
     });
@@ -299,7 +350,21 @@ async function check(mode) {
     if (data.speak && data.utterance.trim()) {
       // AIおまかせのときだけAIが選んだ値を使う。それ以外は指示したレベルで声を演じさせる
       const level = cfg.mode === "ai" ? clampLevel(data.tension) : target;
-      await say(data.utterance.trim(), data.reason, { tension: level, laugh: laughOn, names: targets.map((t) => t.name) });
+      const segments = [{ kind: "talk", text: data.utterance.trim() }];
+      const performance = (data.performance ?? "").trim();
+      if (plan.perfType && performance) {
+        segments.push({ kind: "perform", type: plan.perfType, text: performance });
+        // 一発ギャグのあとは、自分で長めに爆笑する
+        if (plan.perfType === "gag") segments.push({ kind: "laugh", text: (data.laugh_after ?? "").trim() || DEFAULT_LAUGH_AFTER });
+      }
+      // 誰に振ったかを数える。上限に達したら、次はその人以外
+      ({ focus: state.focus, cooldown: state.cooldown } = applyTurn(
+        { focus: state.focus, cooldown: state.cooldown },
+        matchParticipant(data.target, names),
+        rules.maxAsks,
+      ));
+      renderFocus();
+      await say(segments, data.reason, { tension: level, laugh: laughOn, names: targets.map((t) => t.name) });
     } else {
       log("skip", "（見送り）", data.reason);
     }
@@ -345,6 +410,8 @@ function start() {
   state.running = true;
   state.startedAt = state.lastCheckAt = state.lastVoiceAt = Date.now();
   state.tension = null;
+  state.focus = state.cooldown = null;
+  state.lastTargets = [];
   unlockAudio(); // 開始ボタンを押した今のうちに、あとからの自動再生を許可してもらう
   keepAwake(true);
   $("#next").disabled = false;
@@ -363,7 +430,7 @@ function stop() {
   state.pendingNext = false;
   state.speaking = state.talking = false;
   listener.stop();
-  stopSpeaking();
+  cancelSay();
   clearInterval(typeTimer);
   keepAwake(false);
   $("#next").disabled = true;
@@ -380,7 +447,7 @@ $("#next").addEventListener("click", () => {
   if (!state.running) return;
   log("system", "幹事が「次へ」を押しました");
   // しゃべり中なら打ち切る。読み上げ完了後に pendingNext として処理される
-  if (state.speaking) stopSpeaking();
+  if (state.speaking) cancelSay();
   check("next");
 });
 

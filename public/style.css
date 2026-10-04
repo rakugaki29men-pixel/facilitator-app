@@ -264,3 +264,7 @@ textarea { resize: vertical; }
 .participant-card .sub { margin-top: 4px; }
 .participant-card .sub[open] { padding-bottom: 4px; }
 #laugh-test { margin-top: 4px; }
+.checks { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.check input { width: auto; }
+.focus-text { min-height: 1.4em; opacity: 0.8; font-size: 0.95rem; }
