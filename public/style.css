@@ -338,3 +338,23 @@ button.wide { width: 100%; margin-top: 12px; }
 .done-card { text-align: center; display: grid; gap: 6px; padding: 16px 24px; background: rgba(255, 255, 255, 0.9); border-radius: 16px; }
 .nominees { font-size: 1.6rem; font-weight: bold; color: var(--accent); }
 .done-card small { color: var(--muted); }
+
+/* ---- 資料 ---- */
+.mat-list { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 6px; }
+.mat-list li { display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-bottom: 1px solid var(--border); }
+.mat-list .name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.mat-list small { display: block; color: var(--muted); }
+.file-btn {
+  display: block;
+  text-align: center;
+  padding: 10px 14px;
+  border: 1px dashed var(--accent);
+  border-radius: 8px;
+  color: var(--accent);
+  font-weight: bold;
+  cursor: pointer;
+  background: var(--accent-soft);
+}
+.file-btn.disabled { opacity: 0.4; pointer-events: none; }
+.notice { margin: 0 0 8px; padding: 8px 10px; background: #fff7e6; border: 1px solid #f0d9a8; border-radius: 8px; white-space: pre-wrap; font-size: 0.9rem; }
+.mat-preview { white-space: pre-wrap; font-size: 0.8rem; background: var(--bg); padding: 10px; border-radius: 6px; max-height: 40vh; overflow-y: auto; }

@@ -123,8 +123,16 @@ const PRESENT_RULES = `あなたは会社の懇親会の「声だけの司会者
 # 返答の形式
 - speak は常に true。tension は実際に演じたレベル。target は発表者の名前。performance と laugh_after は空文字`;
 
-export function buildPresentSystemPrompt(settings) {
-  return [PRESENT_RULES, settingsToPrompt(settings, "present")].filter(Boolean).join("\n\n");
+// 事前資料があるときだけ付ける。資料を読んでいることを、発言で悟られないための決まり
+const MATERIAL_RULES = `# 事前資料の扱い（最重要：資料を読んでいることを悟られない）
+- 「事前資料」は、あなたの背景知識として黙って使う。資料があること自体を、発言で匂わせない
+- 次は禁止：「資料によると」「スライドに」「〇ページ」「配布資料」「事前に拝見」「書いてありましたが」など、資料を見たと分かる言い方。発表で話されていない、資料だけにある数字・固有名詞・図表・見出しを出すこと
+- 質問は、発表で実際に話された内容から作る。資料は、専門用語や固有名詞の正しい意味・表記の確認、音声認識の聞き間違いの補正、話された内容の背景の理解にだけ使う
+- 資料にあって発表では触れられなかった点を聞きたいときは、「ほかに力を入れたところはありますか？」のように、資料の中身を示さない自然な聞き方にする
+- 発表と資料が食い違うときは、発表で話された内容を優先する`;
+
+export function buildPresentSystemPrompt(settings, { hasMaterials = false } = {}) {
+  return [PRESENT_RULES, hasMaterials && MATERIAL_RULES, settingsToPrompt(settings, "present")].filter(Boolean).join("\n\n");
 }
 
 /**
@@ -136,14 +144,18 @@ export function buildPresentSystemPrompt(settings) {
  * @param {number} p.index  何問目か（0始まり）
  * @param {number} p.total
  * @param {"normal"|"critical"|"powerhara"|"praise"} p.mode  質問の種類
+ * @param {string} [p.materials]  事前資料の文字情報（任意。NGワード置換済み）
  */
-export function buildQuestionMessage({ presenter, transcript, qa, index, total, mode, tension, laugh, now }) {
+export function buildQuestionMessage({ presenter, transcript, qa, index, total, mode, tension, laugh, now, materials = "" }) {
   const m = QUESTION_MODES[mode];
   const parts = [
     `現在 ${clock(now)}`,
     `## 発表者\n${presenter}さん`,
     `## プレゼンの内容（音声認識の書き起こし。NGワードは置き換え済み）\n${trimTranscript(transcript)}`,
   ];
+  if (materials) {
+    parts.push(`## 事前資料（発表者の資料の文字情報。NGワードは置き換え済み。背景知識として黙って使い、資料の存在を悟られないこと）\n${materials}`);
+  }
   if (qa.length) {
     const lines = qa.map((x, i) => `Q${i + 1}（あなた）：${x.q}\nA${i + 1}（${presenter}さん・聞き取り）：${x.a || "（聞き取れなかった）"}`);
     parts.push(`## これまでの質問と回答\n${lines.join("\n")}`);

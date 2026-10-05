@@ -30,6 +30,26 @@
         <p class="hint">開始すると、あなたが「プレゼン終了」を押すまで、司会は話さずに聞くだけです。終わったら、AIに送る前に内容を確認できます。</p>
       </section>
 
+      <section class="panel" id="materials-panel">
+        <h2>📎 資料（任意） <small>発表者ごとに、事前に登録できます</small></h2>
+        <p id="mat-who" class="hint"></p>
+        <ul id="mat-list" class="mat-list"></ul>
+        <p id="mat-msg" class="notice" role="alert" hidden></p>
+        <label class="file-btn">＋ ファイルを追加（PDF / pptx / docx / txt）
+          <input id="mat-file" type="file" multiple accept=".pdf,.pptx,.docx,.txt,.md,.csv" hidden>
+        </label>
+        <details class="sub">
+          <summary>テキストを貼り付けて追加</summary>
+          <textarea id="mat-paste" rows="4" placeholder="スライドの文章やメモを貼り付け"></textarea>
+          <button id="mat-paste-add" type="button">追加</button>
+        </details>
+        <details class="sub">
+          <summary>AIに渡る内容を確認（NGワード置換後）</summary>
+          <pre id="mat-preview" class="mat-preview"></pre>
+        </details>
+        <p class="hint">文字の情報だけを読みます（図や画像の中の文字、画像だけのPDFは読めません）。ファイルそのものは保存せず、取り出した文字だけを、この端末のブラウザに保存します。司会には、資料を読んだことを話さないよう指示しています。</p>
+      </section>
+
       <section class="panel">
         <h2>質問者に指名された回数 <small>全体を通して、少ない人から指名します</small></h2>
         <ul id="counts" class="counts"></ul>
@@ -53,6 +73,7 @@
         </label>
         <div id="settings"></div>
         <button id="voice-test" type="button">🔊 声のテスト</button>
+        <div id="transfer"></div>
         <details class="section preview">
           <summary>AIへの指示文を確認</summary>
           <pre id="prompt-preview"></pre>

@@ -11,7 +11,7 @@ import { FREQUENCIES, freqInfo, splitList } from "./pokes.js";
 import { LAUGH_LEVELS, laughInfo } from "./laugh.js";
 import { PERF_TYPES, LAUGH_AFTER_VOICE } from "./flow.js";
 
-const STORAGE_KEY = "facilitator-settings-v1";
+export const STORAGE_KEY = "facilitator-settings-v1";
 
 export const CHARACTER_PRESETS = [
   { id: "kansai", icon: "🎤", label: "関西の芸人司会", text: "ノリとツッコミが命の関西芸人。ボケを拾ってツッコみ、場を笑いで回す。" },

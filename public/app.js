@@ -5,6 +5,7 @@ import { drawLaugh, laughInfo } from "./laugh.js";
 import { planTurn, applyTurn, matchParticipant, enabledPerfTypes, PERF_TYPES, DEFAULT_LAUGH_AFTER } from "./flow.js";
 import { buildSystemPrompt, buildUserMessage } from "./prompt.js";
 import { Listener, speak, stopSpeaking, unlockAudio, isRecognitionSupported } from "./speech.js";
+import { renderTransfer } from "./transfer.js";
 import { $, passcode, bindPasscodeInput, decide, createWakeLock, createBubble, createLogger, createVoiceOptions } from "./common.js";
 
 const settings = loadSettings();
@@ -390,6 +391,7 @@ $("#manual").addEventListener("submit", (e) => {
 });
 
 // ---- 初期化 ----
+renderTransfer($("#transfer"), settings);
 bindPasscodeInput();
 renderSettings($("#settings"), settings, onSettingsChange);
 refreshPromptPreview();
