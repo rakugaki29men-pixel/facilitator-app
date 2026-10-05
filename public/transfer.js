@@ -1,13 +1,10 @@
-// 設定と資料を、別の端末へ移す（スマホで準備して、当日のPCで使うため）。
-// 設定・資料はブラウザごとに保存されるので、端末をまたぐときはファイルかテキストで持っていく。
+// 設定を、別の端末へ移す（スマホで準備して、当日のPCで使うため）。
+// 設定はブラウザごとに保存されるので、端末をまたぐときはファイルかテキストで持っていく。
 // 合言葉は含めない（移した先で入力する）。
 import { STORAGE_KEY } from "./settings.js";
-import { loadMaterials, saveMaterials } from "./materials.js";
 
-export function buildBackup(settings, { includeMaterials = true } = {}) {
-  const data = { app: "facilitator-app", version: 1, exportedAt: new Date().toISOString(), settings };
-  if (includeMaterials) data.materials = loadMaterials();
-  return JSON.stringify(data);
+export function buildBackup(settings) {
+  return JSON.stringify({ app: "facilitator-app", version: 1, exportedAt: new Date().toISOString(), settings });
 }
 
 export function parseBackup(text) {
@@ -23,15 +20,8 @@ export function parseBackup(text) {
   return data;
 }
 
-/** @returns {{materials:number}} 読み込んだ資料の数 */
 export function applyBackup(data) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data.settings));
-  let materials = 0;
-  if (data.materials && typeof data.materials === "object") {
-    if (!saveMaterials(data.materials)) throw new Error("資料を保存できませんでした（ブラウザの保存容量が足りません）");
-    materials = Object.values(data.materials).reduce((n, files) => n + files.length, 0);
-  }
-  return { materials };
 }
 
 function h(tag, props = {}, ...children) {
@@ -43,14 +33,13 @@ function h(tag, props = {}, ...children) {
 
 /** 設定画面の下に出す「引き継ぎ」の部品 */
 export function renderTransfer(root, settings) {
-  const withMaterials = h("input", { type: "checkbox", checked: true });
   const message = h("p", { className: "hint", hidden: true });
   const say = (text) => {
     message.textContent = text;
     message.hidden = !text;
   };
   const paste = h("textarea", { rows: 3, placeholder: "コピーしたバックアップを、ここに貼り付けて「読み込む」" });
-  const current = () => buildBackup(settings, { includeMaterials: withMaterials.checked });
+  const current = () => buildBackup(settings);
 
   const download = h("button", {
     type: "button",
@@ -83,9 +72,9 @@ export function renderTransfer(root, settings) {
   const apply = (text) => {
     try {
       const data = parseBackup(text);
-      if (!confirm("この端末の設定（と資料）を、バックアップの内容で置き換えます。よろしいですか？")) return;
-      const { materials } = applyBackup(data);
-      alert(`読み込みました${materials ? `（資料${materials}件）` : ""}。画面を読み込み直します。`);
+      if (!confirm("この端末の設定を、バックアップの内容で置き換えます。よろしいですか？")) return;
+      applyBackup(data);
+      alert("読み込みました。画面を読み込み直します。");
       location.reload();
     } catch (err) {
       say(err.message);
@@ -105,10 +94,9 @@ export function renderTransfer(root, settings) {
     h(
       "details",
       { className: "section" },
-      h("summary", {}, "引き継ぎ（別の端末へ設定・資料を移す）"),
+      h("summary", {}, "引き継ぎ（別の端末へ設定を移す）"),
       h("div", { className: "section-body" },
-        h("p", { className: "hint" }, "設定と資料は、この端末のブラウザにだけ保存されています。当日使う端末が別なら、ここで移してください（合言葉は含まれません）。"),
-        h("label", { className: "check" }, withMaterials, "資料も含める"),
+        h("p", { className: "hint" }, "設定は、この端末のブラウザにだけ保存されています。当日使う端末が別なら、ここで移してください（合言葉は含まれません）。"),
         h("div", { className: "chips" }, download, copy),
         h("label", { className: "field" }, h("span", {}, "ファイルから読み込む"), file),
         h("label", { className: "field" }, h("span", {}, "貼り付けから読み込む"), paste),

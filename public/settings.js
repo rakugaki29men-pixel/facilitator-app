@@ -379,7 +379,7 @@ export const SECTIONS = [
     id: "presentation",
     title: "プレゼン進行",
     modes: ["present"],
-    defaults: { questions: 3, nominees: 2, answerSilenceSec: 4, answerMaxWaitSec: 30 },
+    defaults: { style: "serious", questions: 3, nominees: 2, answerSilenceSec: 4, answerMaxWaitSec: 30 },
     render(root, value, update) {
       const set = setter(value, update);
       const select = (key, options, unit) =>
@@ -390,7 +390,11 @@ export const SECTIONS = [
         const input = el("input", { type: "range", min, max, step, value: value[key], oninput: (e) => { out.textContent = `${e.target.value}秒`; set(key)(Number(e.target.value)); } });
         return el("div", { className: "range" }, input, out);
       };
+      const style = el("select", { onchange: (e) => set("style")(e.target.value) },
+        el("option", { value: "serious", textContent: "じっくり（発表の内容を重視。笑いやテンションの急変はなし）", selected: value.style !== "lively" }),
+        el("option", { value: "lively", textContent: "にぎやか（飲み会と同じノリ。テンション・笑いの設定を使う）", selected: value.style === "lively" }));
       root.append(
+        field("司会のノリ", style),
         field("発表者への質問の数（初期値。送信前にその場で変えられます）", select("questions", [2, 3], "つ")),
         field("質問者として指名する人数（初期値。その場で変えられます）", select("nominees", [2, 3], "人")),
         field("答えが終わったとみなす沈黙（秒）", range("answerSilenceSec", 2, 10, 1)),

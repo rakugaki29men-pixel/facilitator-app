@@ -1,6 +1,6 @@
 // AIへの指示文を組み立てる。設定は毎回ここで読み直すので、途中変更が次の判断から反映される。
 import { settingsToPrompt } from "./settings.js";
-import { QUESTION_MODES, trimTranscript } from "./present.js";
+import { QUESTION_MODES, QUESTION_FORMS, formFor, trimTranscript } from "./present.js";
 
 const BASE_RULES = `あなたは会社の懇親会の「声だけの司会者」です。スピーカーから合成音声で話します。
 会場のパソコンのマイクで会話を聞き取っていますが、聞き取りは不正確で、話者の区別もできません。
@@ -106,33 +106,37 @@ export function buildUserMessage({ mode, recentHeard, earlierHeard, aiHistory, s
 // ---------------------------------------------------------------------------
 
 const PRESENT_RULES = `あなたは会社の懇親会の「声だけの司会者」です。スピーカーから合成音声で話します。
-今は「プレゼン進行」の時間です。参加者の一人がプレゼンを終えたところで、あなたは発表者に質問をします。
+今は「プレゼン進行」の時間です。参加者の一人がプレゼンを終えたところで、あなたは発表の内容を深く理解し、見解を伝えたうえで、発表者に深掘りの質問をします。
 
 # 入力について
 - プレゼンの内容は音声認識の書き起こしで、誤認識や言い間違いが混ざる。意味が通らない部分は文脈から推測する
 - 社外秘などの言葉は、事前に伏せ字や別の言葉に置き換えてある（「〇〇」など）。置き換えられた部分の元の言葉を推測したり、聞き返したりしない
 
-# 質問のしかた
-- 発表者の名前を呼んで質問する。1回の発言で質問は1つだけ。答えやすい長さにする
+# 発言の組み立て（毎回）
+1. まず、発表を聞いての見解（感想・気づき）を、1〜2文で述べる。発表で実際に話された内容にもとづくこと。発表者の言葉や表現を引用すると、ちゃんと聞いていることが伝わる
+2. そのうえで、質問を1つだけする。質問の型（確認型・掘り下げ型）は、毎回こちらが指定する
+   - 確認型：発表の主張を自分の言葉で言い換えて、「これは〇〇ということですか？」と確かめる
+   - 掘り下げ型：理由・背景・根拠・具体例・きっかけ・他との違い・今後などを、一段深く聞く
+3. 前の質問への回答が渡されたときは、その内容を受けて見解を述べる。同じことを聞き直さない
 - 質問の種類（ふつう／批判／パワハラ風／肯定）は、毎回こちらが指定する。指定された種類に従う
-- 前の質問への回答が渡されたときは、その内容を踏まえて質問する。同じことを聞き直さない
-- 読み上げられるので、1〜3文・80文字程度まで。記号・絵文字・顔文字・英字略語は使わない。笑い声は別
+
+# 発言のルール
+- 読み上げられるので、2〜4文・150文字程度まで。記号・絵文字・顔文字・英字略語は使わない。笑い声は別
 - 下ネタ、容姿・年齢・性別・恋愛・家族・病気・政治宗教・人事評価などのきわどい話題は避ける
 - 自分がAIであることは隠さなくてよい
 
 # 返答の形式
 - speak は常に true。tension は実際に演じたレベル。target は発表者の名前。performance と laugh_after は空文字`;
 
-// 事前資料があるときだけ付ける。資料を読んでいることを、発言で悟られないための決まり
-const MATERIAL_RULES = `# 事前資料の扱い（最重要：資料を読んでいることを悟られない）
-- 「事前資料」は、あなたの背景知識として黙って使う。資料があること自体を、発言で匂わせない
-- 次は禁止：「資料によると」「スライドに」「〇ページ」「配布資料」「事前に拝見」「書いてありましたが」など、資料を見たと分かる言い方。発表で話されていない、資料だけにある数字・固有名詞・図表・見出しを出すこと
-- 質問は、発表で実際に話された内容から作る。資料は、専門用語や固有名詞の正しい意味・表記の確認、音声認識の聞き間違いの補正、話された内容の背景の理解にだけ使う
-- 資料にあって発表では触れられなかった点を聞きたいときは、「ほかに力を入れたところはありますか？」のように、資料の中身を示さない自然な聞き方にする
-- 発表と資料が食い違うときは、発表で話された内容を優先する`;
+// 「ノリ」の指定。じっくり=発表の内容重視、にぎやか=飲み会と同じノリ
+const PRESENT_STYLE = {
+  serious: "# ノリ\n- 発表の内容の理解と深掘りを最優先にする。キャラクターの口調は保つが、ふざけすぎたり、茶化したり、話をそらしたりしない。ボケや大げさなリアクションは控えめに",
+  lively: "# ノリ\n- 発表の内容に触れつつ、飲み会らしい明るいノリや、軽いツッコミを入れてよい",
+};
 
-export function buildPresentSystemPrompt(settings, { hasMaterials = false } = {}) {
-  return [PRESENT_RULES, hasMaterials && MATERIAL_RULES, settingsToPrompt(settings, "present")].filter(Boolean).join("\n\n");
+export function buildPresentSystemPrompt(settings) {
+  const style = PRESENT_STYLE[settings.presentation.style] ?? PRESENT_STYLE.serious;
+  return [PRESENT_RULES, style, settingsToPrompt(settings, "present")].filter(Boolean).join("\n\n");
 }
 
 /**
@@ -144,18 +148,15 @@ export function buildPresentSystemPrompt(settings, { hasMaterials = false } = {}
  * @param {number} p.index  何問目か（0始まり）
  * @param {number} p.total
  * @param {"normal"|"critical"|"powerhara"|"praise"} p.mode  質問の種類
- * @param {string} [p.materials]  事前資料の文字情報（任意。NGワード置換済み）
  */
-export function buildQuestionMessage({ presenter, transcript, qa, index, total, mode, tension, laugh, now, materials = "" }) {
+export function buildQuestionMessage({ presenter, transcript, qa, index, total, mode, tension, laugh, now }) {
   const m = QUESTION_MODES[mode];
+  const form = QUESTION_FORMS[formFor(index)];
   const parts = [
     `現在 ${clock(now)}`,
     `## 発表者\n${presenter}さん`,
     `## プレゼンの内容（音声認識の書き起こし。NGワードは置き換え済み）\n${trimTranscript(transcript)}`,
   ];
-  if (materials) {
-    parts.push(`## 事前資料（発表者の資料の文字情報。NGワードは置き換え済み。背景知識として黙って使い、資料の存在を悟られないこと）\n${materials}`);
-  }
   if (qa.length) {
     const lines = qa.map((x, i) => `Q${i + 1}（あなた）：${x.q}\nA${i + 1}（${presenter}さん・聞き取り）：${x.a || "（聞き取れなかった）"}`);
     parts.push(`## これまでの質問と回答\n${lines.join("\n")}`);
@@ -163,9 +164,10 @@ export function buildQuestionMessage({ presenter, transcript, qa, index, total, 
   parts.push(
     [
       `## 今回の指示`,
-      `質問 ${index + 1}/${total}（種類：${m.label}）`,
-      `- ${m.say}`,
-      `- ${presenter}さんの名前を呼んで、質問を1つだけする`,
+      `質問 ${index + 1}/${total}（種類：${m.label}／型：${form.label}）`,
+      `- 種類の指示：${m.say}`,
+      `- まず、発表（と、これまでの回答）を聞いての見解を1〜2文で述べる`,
+      `- そのうえで、${presenter}さんの名前を呼んで、${form.label}の質問を1つだけする：${form.say}`,
       index + 1 === total ? "- これが最後の質問" : "",
     ]
       .filter(Boolean)

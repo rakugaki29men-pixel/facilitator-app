@@ -33,6 +33,21 @@ export const QUESTION_MODES = {
   },
 };
 
+// 質問の型。毎回「見解 → 質問」の順に話す。質問は、確認型と掘り下げ型を交互に使う
+export const QUESTION_FORMS = {
+  confirm: {
+    label: "確認型",
+    say: "発表の主張や要点を、自分の言葉で言い換えて、「これは〇〇ということですか？」と確かめる（発表者の言葉を引用してよい）",
+  },
+  dig: {
+    label: "掘り下げ型",
+    say: "理由・背景・根拠・具体例・きっかけ・他との違い・今後どうするか、のどれかを、一段深く聞く",
+  },
+};
+
+/** 何問目かで、質問の型を決める（1問目は確認型、2問目は掘り下げ型、3問目は確認型…） */
+export const formFor = (index) => (index % 2 === 0 ? "confirm" : "dig");
+
 /** 質問の数に応じた、種類の初期値。最後の質問は、良い形で終わるために肯定（ほめ） */
 export function defaultFlags(count) {
   return Array.from({ length: count }, (_, i) => (i === count - 1 ? "praise" : "normal"));

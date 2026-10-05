@@ -10,9 +10,6 @@ import { Listener, speak, stopSpeaking, unlockAudio, isRecognitionSupported } fr
 import { buildPresentSystemPrompt, buildQuestionMessage, buildNominateMessage } from "./prompt.js";
 import { QUESTION_MODES, defaultFlags, applyNg, mergeHits, pickNominees } from "./present.js";
 import { $, passcode, bindPasscodeInput, decide, createWakeLock, createBubble, createLogger, createVoiceOptions } from "./common.js";
-import {
-  ACCEPT, loadMaterials, saveMaterials, materialsFor, addMaterial, removeMaterial, buildMaterialText, extractFile, pastedMaterial,
-} from "./materials.js";
 import { renderTransfer } from "./transfer.js";
 
 const settings = loadSettings();
@@ -59,10 +56,8 @@ const state = {
   sayToken: 0,
   tension: null,
   retry: null,
-  materials: "", // 事前資料の文字情報（NGワード置換済み）。資料がなければ空
 };
 
-let materialStore = loadMaterials(); // 発表者ごとの事前資料
 
 // 画面（ライブ表示・字幕・ログ）に出す文字にもNGワードを当てる。会場から画面が見えても、社外秘が映らないように
 const mask = (text) => applyNg(text, settings.ngwords.list).text;
@@ -169,10 +164,9 @@ function renderPrep() {
   const prev = select.value;
   select.replaceChildren(
     new Option("選んでください", ""),
-    ...list.map((n) => new Option(`${n}${store.done.includes(n) ? "（発表済）" : ""}${materialsFor(materialStore, n).length ? " 📎" : ""}`, n)),
+    ...list.map((n) => new Option(`${n}${store.done.includes(n) ? "（発表済）" : ""}`, n)),
   );
   if (list.includes(prev)) select.value = prev;
-  renderMaterials();
 
   const ul = $("#counts");
   ul.replaceChildren();
@@ -184,7 +178,7 @@ function renderPrep() {
   for (const n of list) {
     const li = document.createElement("li");
     const name = document.createElement("span");
-    name.textContent = `${n}${store.done.includes(n) ? "（発表済）" : ""}${materialsFor(materialStore, n).length ? " 📎" : ""}`;
+    name.textContent = `${n}${store.done.includes(n) ? "（発表済）" : ""}`;
     const count = document.createElement("span");
     count.textContent = `${store.counts[n] ?? 0}回`;
     if (store.done.includes(n)) li.className = "done";
@@ -206,7 +200,7 @@ function startPresent() {
   if (!isRecognitionSupported) return prepMessage("このブラウザは音声認識に対応していません。Chrome か Edge を使ってください。");
   prepMessage("");
 
-  Object.assign(state, { presenter, chunks: [], text: "", hits: [], qa: [], qIndex: 0, waiting: null, answerBuf: [], skipWait: false, tension: null, retry: null, materials: "" });
+  Object.assign(state, { presenter, chunks: [], text: "", hits: [], qa: [], qIndex: 0, waiting: null, answerBuf: [], skipWait: false, tension: null, retry: null });
   state.runId++;
   state.presentStartedAt = Date.now();
   unlockAudio(); // 開始ボタンを押した今のうちに、あとからの自動再生を許可してもらう
@@ -317,11 +311,6 @@ function send() {
   if (!text) return log("error", "書き起こしが空です。録音を再開するか、直接入力してください。");
   state.text = text;
   state.qa = [];
-  // 事前資料があれば、NGワードを当てて、質問を作るときにAIへ内緒で渡す
-  const files = materialsFor(materialStore, state.presenter);
-  const material = files.length ? buildMaterialText(files, settings.ngwords.list) : null;
-  state.materials = material?.text ?? "";
-  if (material) log("system", `📎 事前資料${files.length}件つきで質問を作ります（${material.chars}文字${material.truncated ? "・上限で省略" : ""}）`);
   listener.start(); // 質問への答えを聞き取る
   runQuestion(0);
 }
@@ -365,11 +354,14 @@ function cancelSay() {
   state.speaking = state.talking = false;
 }
 
+// 「じっくり」は発表の内容重視：笑い声は入れず、テンションは基本のレベルで一定にする。「にぎやか」は飲み会と同じ設定を使う
+const isLively = () => settings.presentation.style === "lively";
 const drawTurn = () => ({
-  level: targetTension(settings.tension, Date.now() - state.openedAt, state.tension),
-  laugh: drawLaugh(settings.laugh.level),
+  level: isLively() ? targetTension(settings.tension, Date.now() - state.openedAt, state.tension) : clampLevel(settings.tension.base),
+  laugh: isLively() && drawLaugh(settings.laugh.level),
 });
-const tensionInfoFor = (level) => ({ level, label: tensionInfo(level).label, ai: settings.tension.mode === "ai" });
+const aiDecidesTension = () => isLively() && settings.tension.mode === "ai";
+const tensionInfoFor = (level) => ({ level, label: tensionInfo(level).label, ai: aiDecidesTension() });
 
 // ---- ③ 質問中 ----
 async function runQuestion(i) {
@@ -385,11 +377,10 @@ async function runQuestion(i) {
   let data;
   try {
     data = await decide(
-      buildPresentSystemPrompt(settings, { hasMaterials: Boolean(state.materials) }),
+      buildPresentSystemPrompt(settings),
       buildQuestionMessage({
         presenter: state.presenter,
         transcript: state.text,
-        materials: state.materials,
         qa: state.qa,
         index: i,
         total: state.config.total,
@@ -411,7 +402,7 @@ async function runQuestion(i) {
   const utterance = (data.utterance ?? "").trim();
   if (!utterance) return fail("AIが質問を返しませんでした", () => runQuestion(i));
   state.qa.push({ q: utterance, a: "" });
-  await say(utterance, { tension: settings.tension.mode === "ai" ? clampLevel(data.tension) : level, laugh });
+  await say(utterance, { tension: aiDecidesTension() ? clampLevel(data.tension) : level, laugh });
   if (runId !== state.runId) return;
   startAnswerWait();
 }
@@ -659,96 +650,12 @@ window.addEventListener("beforeunload", (e) => {
   }
 });
 
-// ---- 資料（任意）：発表者ごとに事前登録 ----
-function matMessage(text) {
-  const node = $("#mat-msg");
-  node.textContent = text;
-  node.hidden = !text;
-}
-
-function renderMaterials() {
-  const person = $("#presenter").value;
-  $("#mat-who").textContent = person ? `${person}さんの資料` : "上で発表者を選ぶと、その人の資料を登録できます。";
-  const files = person ? materialsFor(materialStore, person) : [];
-  const list = $("#mat-list");
-  list.replaceChildren();
-  for (const f of files) {
-    const li = document.createElement("li");
-    const label = document.createElement("div");
-    label.className = "name";
-    label.textContent = f.name;
-    const info = document.createElement("small");
-    info.textContent = `${f.count}${f.unit}・${f.chars}文字${f.truncated ? "（長いので前半のみ）" : ""}`;
-    label.append(info);
-    const del = document.createElement("button");
-    del.type = "button";
-    del.className = "icon-btn";
-    del.textContent = "✕";
-    del.title = "削除";
-    del.addEventListener("click", () => {
-      materialStore = removeMaterial(materialStore, person, f.id);
-      saveMaterials(materialStore);
-      renderPrep();
-    });
-    li.append(label, del);
-    list.append(li);
-  }
-  $(".file-btn").classList.toggle("disabled", !person);
-  $("#mat-file").disabled = !person;
-  $("#mat-paste-add").disabled = !person;
-  // AIに渡る内容（NGワード置換後）の確認用
-  const preview = $("#mat-preview");
-  if (!files.length) {
-    preview.textContent = "（資料はありません）";
-    return;
-  }
-  const built = buildMaterialText(files, settings.ngwords.list);
-  const ngTotal = built.hits.reduce((n, h) => n + h.count, 0);
-  preview.textContent = `${built.chars}文字${ngTotal ? `・NGワードを${ngTotal}件置き換え済み` : ""}${built.truncated ? "・長いので途中まで" : ""}\n\n${built.text.slice(0, 3000)}${built.text.length > 3000 ? "\n…（以下省略）" : ""}`;
-}
-
-// 保存に失敗したら、画面と保存内容がずれないように読み直す
-function persistMaterials(errors) {
-  if (!saveMaterials(materialStore)) {
-    materialStore = loadMaterials();
-    errors.push("保存できませんでした（ブラウザの保存容量がいっぱいです。不要な資料を消してください）");
-  }
-}
-
-$("#presenter").addEventListener("change", renderMaterials);
-$("#mat-file").addEventListener("change", async (e) => {
-  const person = $("#presenter").value;
-  const files = [...e.target.files];
-  e.target.value = "";
-  if (!person || !files.length) return;
-  matMessage("読み込み中…");
-  const errors = [];
-  for (const file of files) {
-    try {
-      materialStore = addMaterial(materialStore, person, await extractFile(file));
-    } catch (err) {
-      errors.push(err.message);
-    }
-  }
-  persistMaterials(errors);
-  matMessage(errors.join("\n"));
-  renderPrep();
-});
-$("#mat-paste-add").addEventListener("click", () => {
-  const person = $("#presenter").value;
-  const text = $("#mat-paste").value.trim();
-  if (!person || !text) return;
-  const errors = [];
-  const stamp = new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  materialStore = addMaterial(materialStore, person, pastedMaterial(text, `貼り付けメモ ${stamp}`));
-  persistMaterials(errors);
-  $("#mat-paste").value = "";
-  matMessage(errors.join("\n"));
-  renderPrep();
-});
-
 // ---- 初期化 ----
-$("#mat-file").accept = ACCEPT;
+try {
+  localStorage.removeItem("facilitator-materials-v1"); // 以前の「資料」機能が残した保存データ
+} catch {
+  // 消せなくても影響はない
+}
 renderTransfer($("#transfer"), settings);
 bindPasscodeInput();
 renderSettings($("#settings"), settings, onSettingsChange, "present");
