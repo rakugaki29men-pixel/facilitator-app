@@ -1,24 +1,15 @@
-import { loadSettings, saveSettings, renderSettings, ttsInstructions, characterView } from "./settings.js";
-import { targetTension, tensionInfo, clampLevel, browserVoiceFactor } from "./tension.js";
+import { loadSettings, saveSettings, renderSettings, characterView } from "./settings.js";
+import { targetTension, tensionInfo, clampLevel } from "./tension.js";
 import { drawTargets } from "./pokes.js";
 import { drawLaugh, laughInfo } from "./laugh.js";
 import { planTurn, applyTurn, matchParticipant, enabledPerfTypes, PERF_TYPES, DEFAULT_LAUGH_AFTER } from "./flow.js";
 import { buildSystemPrompt, buildUserMessage } from "./prompt.js";
 import { Listener, speak, stopSpeaking, unlockAudio, isRecognitionSupported } from "./speech.js";
-
-const $ = (sel) => document.querySelector(sel);
+import { $, passcode, bindPasscodeInput, decide, createWakeLock, createBubble, createLogger, createVoiceOptions } from "./common.js";
 
 const settings = loadSettings();
-
-// 合言葉はこの端末のブラウザにだけ保存する（設定とは別。AIへの指示文には入れない）
-const PASSCODE_KEY = "facilitator-passcode";
-function passcode() {
-  try {
-    return localStorage.getItem(PASSCODE_KEY) || "";
-  } catch {
-    return $("#passcode").value;
-  }
-}
+const log = createLogger();
+const voiceOptions = createVoiceOptions(settings, log);
 
 const state = {
   running: false,
@@ -106,15 +97,6 @@ function setupMessage(text) {
   node.hidden = !text;
 }
 
-let alertTimer = null;
-function stageAlert(text) {
-  const node = $("#stage-alert");
-  node.textContent = text;
-  node.hidden = false;
-  clearTimeout(alertTimer);
-  alertTimer = setTimeout(() => (node.hidden = true), 12_000);
-}
-
 // ---- 表示 ----
 function refreshStatus() {
   let mode = "idle";
@@ -131,66 +113,15 @@ function refreshStatus() {
   $("#stage").dataset.mode = mode;
 }
 
-function log(kind, text, note = "") {
-  const list = $("#log");
-  const time = new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  const item = document.createElement("li");
-  item.className = `log-${kind}`;
-  const t = document.createElement("time");
-  t.textContent = time;
-  const body = document.createElement("span");
-  body.textContent = text;
-  item.append(t, body);
-  if (note) {
-    const n = document.createElement("small");
-    n.textContent = note;
-    item.append(n);
-  }
-  list.prepend(item);
-  while (list.children.length > 200) list.lastChild.remove();
-  if (kind === "error") stageAlert(text);
-}
-
 function refreshPromptPreview() {
   $("#prompt-preview").textContent = buildSystemPrompt(settings);
 }
 
-// 吹き出し：声に合わせて1文字ずつ出す。終わったら全文を薄く残して、あとから読めるようにする
-let typeTimer = null;
-function showBubble(text) {
-  clearInterval(typeTimer);
-  const node = $("#bubble");
-  node.classList.remove("dim");
-  node.textContent = "";
-  let i = 0;
-  typeTimer = setInterval(() => {
-    node.textContent = text.slice(0, ++i);
-    if (i >= text.length) clearInterval(typeTimer);
-  }, 110);
-}
-function settleBubble(text) {
-  clearInterval(typeTimer);
-  const node = $("#bubble");
-  node.textContent = text;
-  node.classList.add("dim");
-}
-
+const bubble = createBubble($("#bubble"));
+const showBubble = bubble.show;
+const settleBubble = bubble.settle;
 // 画面が消えると聞き取りも止まるので、進行中は消灯させない
-let wakeLock = null;
-async function keepAwake(on) {
-  try {
-    if (on) wakeLock = await navigator.wakeLock?.request("screen");
-    else {
-      await wakeLock?.release();
-      wakeLock = null;
-    }
-  } catch {
-    // 非対応・拒否でも進行には影響しない
-  }
-}
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && state.running) keepAwake(true);
-});
+const keepAwake = createWakeLock(() => state.running);
 
 // ---- 聞き取り ----
 let captionTimer = null;
@@ -225,21 +156,6 @@ const listener = new Listener({
 });
 
 // ---- しゃべる ----
-function voiceOptions({ tension, laugh = false, segment, perfType }) {
-  const a = settings.audio;
-  const f = browserVoiceFactor(tension); // ブラウザの声では速さと高さでテンションを表す
-  return {
-    engine: a.engine,
-    voice: a.openaiVoice,
-    instructions: ttsInstructions(settings, { tension, laugh, segment, perfType }),
-    passcode: passcode(),
-    voiceURI: a.voiceURI,
-    rate: a.rate * f.rate,
-    pitch: a.pitch * f.pitch,
-    onFallback: (err) => log("error", `OpenAIの声が使えないのでブラウザの声で代用します: ${err.message}`),
-  };
-}
-
 // セリフ → （上限の回なら）締めの芸 → （一発ギャグなら）爆笑、を順に読み上げる
 async function say(segments, reason, { tension, laugh, names }) {
   const token = ++state.sayToken;
@@ -322,28 +238,22 @@ async function check(mode) {
   const laughOn = drawLaugh(settings.laugh.level);
 
   try {
-    const res = await fetch("/api/decide", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Passcode": passcode() },
-      body: JSON.stringify({
-        system: buildSystemPrompt(settings),
-        user: buildUserMessage({
-          mode,
-          recentHeard,
-          earlierHeard,
-          aiHistory: state.aiHistory,
-          startedAt: state.startedAt,
-          now,
-          silentSec: Math.round((now - state.lastVoiceAt) / 1000),
-          tension: { level: target, label: tensionInfo(target).label, ai: cfg.mode === "ai" },
-          laugh: { on: laughOn, ...laughInfo(settings.laugh.level) },
-          targets,
-          flow: plan.text,
-        }),
+    const data = await decide(
+      buildSystemPrompt(settings),
+      buildUserMessage({
+        mode,
+        recentHeard,
+        earlierHeard,
+        aiHistory: state.aiHistory,
+        startedAt: state.startedAt,
+        now,
+        silentSec: Math.round((now - state.lastVoiceAt) / 1000),
+        tension: { level: target, label: tensionInfo(target).label, ai: cfg.mode === "ai" },
+        laugh: { on: laughOn, ...laughInfo(settings.laugh.level) },
+        targets,
+        flow: plan.text,
       }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    );
 
     if (!state.running) return;
     // 読み上げが終わるまで busy のままにして、発話が重ならないようにする
@@ -431,7 +341,7 @@ function stop() {
   state.speaking = state.talking = false;
   listener.stop();
   cancelSay();
-  clearInterval(typeTimer);
+  bubble.stop();
   keepAwake(false);
   $("#next").disabled = true;
   log("system", "停止しました");
@@ -480,14 +390,7 @@ $("#manual").addEventListener("submit", (e) => {
 });
 
 // ---- 初期化 ----
-$("#passcode").value = passcode();
-$("#passcode").addEventListener("input", (e) => {
-  try {
-    localStorage.setItem(PASSCODE_KEY, e.target.value);
-  } catch {
-    // 保存できなくても、入力欄の値をそのまま使う
-  }
-});
+bindPasscodeInput();
 renderSettings($("#settings"), settings, onSettingsChange);
 refreshPromptPreview();
 refreshStatus();

@@ -200,7 +200,7 @@ export const SECTIONS = [
           el("button", { type: "button", className: "icon-btn add", title: "追加", textContent: "＋", onclick: add })),
       );
     },
-    toPrompt(v) {
+    toPrompt(v, mode) {
       const people = v.list.filter((p) => p.name.trim());
       if (!people.length) return "";
       const lines = people.map((p) => {
@@ -213,8 +213,11 @@ export const SECTIONS = [
         `# 参加者（${people.length}人）`,
         lines.join("\n"),
         "※聞き取った名前が多少違っても、近い名前ならこの人たちのことだと推測してよい。",
-        "※各人の「振りたい話題」「ツッコミワード」は、頻度の設定にもとづいて毎回こちらで抽選し、「今回絡む相手とネタ」として渡す。渡されたものだけを使い、渡されていない人のネタを勝手に持ち出さない。",
-      ].join("\n");
+        mode === "party" &&
+          "※各人の「振りたい話題」「ツッコミワード」は、頻度の設定にもとづいて毎回こちらで抽選し、「今回絡む相手とネタ」として渡す。渡されたものだけを使い、渡されていない人のネタを勝手に持ち出さない。",
+      ]
+        .filter(Boolean)
+        .join("\n");
     },
   },
 
@@ -283,6 +286,7 @@ export const SECTIONS = [
 
   {
     id: "rules",
+    modes: ["party"], // 飲み会モードだけ
     title: "話の振り方・締めの芸",
     defaults: { maxAsks: 3, rap: true, gag: true },
     render(root, value, update) {
@@ -314,6 +318,84 @@ export const SECTIONS = [
           : "- 締めの芸はしない",
         "- 返答の target に振った相手の名前、performance に締めの芸、laugh_after にギャグのあとの爆笑を入れる。指示がない回は performance と laugh_after を空文字にする",
       ].join("\n");
+    },
+  },
+
+  {
+    id: "ngwords",
+    title: "NGワード（プレゼンの伏せ字・削除）",
+    modes: ["present"],
+    defaults: { list: [] },
+    render(root, value, update) {
+      const list = el("div", { className: "ng-list" });
+      const commit = () => update(value);
+      const draw = () => {
+        list.replaceChildren();
+        if (value.list.length === 0) list.append(el("p", { className: "hint" }, "まだありません。下から追加してください。"));
+        value.list.forEach((e, i) => {
+          list.append(
+            el(
+              "div",
+              { className: "participant-row ng-row" },
+              textInput(e.word, (v) => ((e.word = v), commit()), "NGワード（言い換え・読みは「、」で）"),
+              textInput(e.to, (v) => ((e.to = v), commit()), "置換語（空なら削除）"),
+              el("button", {
+                type: "button",
+                className: "icon-btn",
+                title: "削除",
+                textContent: "✕",
+                onclick: () => {
+                  value.list.splice(i, 1);
+                  commit();
+                  draw();
+                },
+              }),
+            ),
+          );
+        });
+      };
+      const wordIn = textInput("", () => {}, "NGワード");
+      const toIn = textInput("", () => {}, "置換語（空=削除）");
+      const add = () => {
+        if (!wordIn.value.trim()) return wordIn.focus();
+        value.list.push({ word: wordIn.value.trim(), to: toIn.value.trim() });
+        wordIn.value = toIn.value = "";
+        commit();
+        draw();
+        wordIn.focus();
+      };
+      for (const input of [wordIn, toIn]) input.addEventListener("keydown", (e) => e.key === "Enter" && !e.isComposing && add());
+      draw();
+      root.append(
+        el("p", { className: "hint" }, "プレゼンの書き起こしをAIに送る前に、ここの語句を自動で置き換え（置換語が空なら削除）ます。読み方（ひらがな）や言い換えは「、」で区切って1行にまとめられます。"),
+        list,
+        el("div", { className: "participant-row ng-row add-row" }, wordIn, toIn,
+          el("button", { type: "button", className: "icon-btn add", title: "追加", textContent: "＋", onclick: add })),
+      );
+    },
+  },
+
+  {
+    id: "presentation",
+    title: "プレゼン進行",
+    modes: ["present"],
+    defaults: { questions: 3, nominees: 2, answerSilenceSec: 4, answerMaxWaitSec: 30 },
+    render(root, value, update) {
+      const set = setter(value, update);
+      const select = (key, options, unit) =>
+        el("select", { onchange: (e) => set(key)(Number(e.target.value)) },
+          ...options.map((n) => el("option", { value: n, textContent: `${n}${unit}`, selected: n === value[key] })));
+      const range = (key, min, max, step) => {
+        const out = el("output", { textContent: `${value[key]}秒` });
+        const input = el("input", { type: "range", min, max, step, value: value[key], oninput: (e) => { out.textContent = `${e.target.value}秒`; set(key)(Number(e.target.value)); } });
+        return el("div", { className: "range" }, input, out);
+      };
+      root.append(
+        field("発表者への質問の数（初期値。送信前にその場で変えられます）", select("questions", [2, 3], "つ")),
+        field("質問者として指名する人数（初期値。その場で変えられます）", select("nominees", [2, 3], "人")),
+        field("答えが終わったとみなす沈黙（秒）", range("answerSilenceSec", 2, 10, 1)),
+        field("答えが始まらないときに待つ最大の秒数", range("answerMaxWaitSec", 10, 90, 5)),
+      );
     },
   },
 
@@ -406,7 +488,7 @@ export const SECTIONS = [
       rate: 1.1,
       pitch: 1.0,
     },
-    render(root, value, update) {
+    render(root, value, update, mode) {
       const set = setter(value, update);
 
       const sliders = {}; // key -> { input, out }
@@ -463,8 +545,12 @@ export const SECTIONS = [
       speechSynthesis.addEventListener("voiceschanged", fillVoices);
 
       root.append(
-        field("AIに「割り込むか」を聞く間隔（秒）", range("intervalSec", 10, 120, 5)),
-        field("沈黙が続いたら話題を振る（秒・0でオフ）", range("silenceSec", 0, 120, 5, (v) => (Number(v) === 0 ? "オフ" : v))),
+        ...(mode === "present"
+          ? []
+          : [
+              field("AIに「割り込むか」を聞く間隔（秒）", range("intervalSec", 10, 120, 5)),
+              field("沈黙が続いたら話題を振る（秒・0でオフ）", range("silenceSec", 0, 120, 5, (v) => (Number(v) === 0 ? "オフ" : v))),
+            ]),
         field("声のエンジン", engineSelect),
         field("声のタイプ（押すと試し聞きできます）", el("div", { className: "chips" }, ...chips)),
         field("OpenAIの声の種類", openaiSelect),
@@ -502,22 +588,25 @@ export function saveSettings(settings) {
 }
 
 // 設定画面を描画。値が変わるたびに onChange(settings) を呼ぶ。
-export function renderSettings(root, settings, onChange) {
+// mode: "party"（飲み会） | "present"（プレゼン進行）。section.modes があれば、そのモードのときだけ表示する。
+export function renderSettings(root, settings, onChange, mode = "party") {
   root.replaceChildren();
   for (const section of SECTIONS) {
+    if (section.modes && !section.modes.includes(mode)) continue;
     const body = el("div", { className: "section-body" });
     section.render(body, settings[section.id], (next) => {
       settings[section.id] = next;
       saveSettings(settings);
       onChange(settings);
-    });
+    }, mode);
     root.append(el("details", { className: "section", open: true }, el("summary", {}, section.title), body));
   }
 }
 
 // 設定 → AIへの指示文（設定由来の部分）
-export function settingsToPrompt(settings) {
-  return SECTIONS.map((s) => s.toPrompt?.(settings[s.id]) || "")
+export function settingsToPrompt(settings, mode = "party") {
+  return SECTIONS.filter((s) => !s.modes || s.modes.includes(mode))
+    .map((s) => s.toPrompt?.(settings[s.id], mode) || "")
     .filter(Boolean)
     .join("\n\n");
 }
