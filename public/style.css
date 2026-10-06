@@ -338,3 +338,7 @@ button.wide { width: 100%; margin-top: 12px; }
 .done-card { text-align: center; display: grid; gap: 6px; padding: 16px 24px; background: rgba(255, 255, 255, 0.9); border-radius: 16px; }
 .nominees { font-size: 1.6rem; font-weight: bold; color: var(--accent); }
 .done-card small { color: var(--muted); }
+
+/* 注意書き（隠れていた時間など） */
+.notice { margin: 0; padding: 8px 10px; background: #fff7e6; border: 1px solid #f0d9a8; border-radius: 8px; font-size: 0.9rem; }
+.notice[hidden] { display: none; }

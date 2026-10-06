@@ -56,6 +56,7 @@ const state = {
   sayToken: 0,
   tension: null,
   retry: null,
+  hiddenMs: 0, // プレゼン中に、この画面が隠れていた時間の合計
 };
 
 
@@ -200,7 +201,7 @@ function startPresent() {
   if (!isRecognitionSupported) return prepMessage("このブラウザは音声認識に対応していません。Chrome か Edge を使ってください。");
   prepMessage("");
 
-  Object.assign(state, { presenter, chunks: [], text: "", hits: [], qa: [], qIndex: 0, waiting: null, answerBuf: [], skipWait: false, tension: null, retry: null });
+  Object.assign(state, { presenter, chunks: [], text: "", hits: [], qa: [], qIndex: 0, waiting: null, answerBuf: [], skipWait: false, tension: null, retry: null, hiddenMs: 0 });
   state.runId++;
   state.presentStartedAt = Date.now();
   unlockAudio(); // 開始ボタンを押した今のうちに、あとからの自動再生を許可してもらう
@@ -235,8 +236,17 @@ function finishPresent() {
   state.config = { total, flags: defaultFlags(total), nominees: settings.presentation.nominees };
   renderConfig();
   renderHits();
+  hiddenNote();
   setPhase("reviewing");
   log("system", `プレゼン終了（${state.chunks.length}件の聞き取り）${r.total ? `。NGワードを${r.total}件置き換えました` : ""}`);
+}
+
+// 確認画面に、プレゼン中に画面が隠れていた時間を出す（その間の書き起こしが欠けている可能性）
+function hiddenNote() {
+  const node = $("#hidden-note");
+  const sec = Math.round(state.hiddenMs / 1000);
+  node.textContent = sec ? `⚠ プレゼン中に、この画面が合計約${sec}秒間、隠れていました。その間の聞き取りが欠けている可能性があります。必要なら、下の欄で補ってください。` : "";
+  node.hidden = !sec;
 }
 
 function renderHits() {
@@ -547,6 +557,10 @@ const listener = new Listener({
       state.waiting.lastVoiceAt = Date.now();
       caption(text);
     }
+  },
+  onHidden(ms) {
+    if (state.phase === "presenting") state.hiddenMs += ms;
+    log("error", `この画面が約${Math.round(ms / 1000)}秒間、他のウィンドウの裏に隠れていました。その間の聞き取りが欠けている可能性があります（隠れると、Chromeが動きを抑えることがあります）。`);
   },
   onState(s) {
     if (s.startsWith("error:")) log("error", `音声認識: ${s.slice(6)}`);

@@ -144,6 +144,9 @@ const listener = new Listener({
     $("#interim").textContent = `👂 ${text}`;
     state.lastVoiceAt = Date.now();
   },
+  onHidden(ms) {
+    log("error", `この画面が約${Math.round(ms / 1000)}秒間、他のウィンドウの裏に隠れていました。その間の聞き取りが欠けている可能性があります（隠れると、Chromeが動きを抑えることがあります）。`);
+  },
   onState(s) {
     if (s.startsWith("error:")) log("error", `音声認識: ${s.slice(6)}`);
     // マイクが使えないまま進行すると「聞いていないのにしゃべる」状態になるので止める

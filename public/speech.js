@@ -19,6 +19,22 @@ export class Listener {
     this.running = false; // 認識エンジンが実際に動いているか
     this.restartDelay = 300;
     this.restartTimer = null;
+    this.hiddenSince = null;
+    // 画面が他のウィンドウ（パワポなど）の裏に隠れると、Chromeは動きを抑える。隠れていた時間を知らせ、戻ったらすぐ聞き取りを立て直す
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") {
+        this.hiddenSince = this.wanted ? Date.now() : null;
+      } else if (this.hiddenSince) {
+        const ms = Date.now() - this.hiddenSince;
+        this.hiddenSince = null;
+        if (this.wanted && !this.paused && !this.running) {
+          clearTimeout(this.restartTimer);
+          this.restartDelay = 300;
+          this.#launch();
+        }
+        if (this.wanted && ms >= 5000) this.handlers.onHidden?.(ms);
+      }
+    });
   }
 
   start() {
