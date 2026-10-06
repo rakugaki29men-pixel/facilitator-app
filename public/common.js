@@ -41,17 +41,27 @@ export async function decide(system, user) {
 }
 
 // ---- 画面が消えると聞き取りも止まるので、進行中は消灯させない ----
-export function createWakeLock(isActive) {
+// onResult(true/false): 防止が効いている/効いていない、が変わったときに呼ぶ
+export function createWakeLock(isActive, onResult) {
   let lock = null;
+  let last = null;
+  const report = (ok) => {
+    if (ok !== last) onResult?.(ok);
+    last = ok;
+  };
   async function set(on) {
     try {
-      if (on) lock = await navigator.wakeLock?.request("screen");
-      else {
+      if (on) {
+        if (!navigator.wakeLock) return report(false);
+        lock = await navigator.wakeLock.request("screen");
+        report(true);
+      } else {
         await lock?.release();
         lock = null;
+        last = null;
       }
     } catch {
-      // 非対応・拒否でも進行には影響しない
+      report(false); // 非対応・拒否でも進行には影響しない。ただし、効いていないことは知らせる
     }
   }
   document.addEventListener("visibilitychange", () => {

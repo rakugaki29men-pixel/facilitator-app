@@ -20,11 +20,29 @@ export class Listener {
     this.restartDelay = 300;
     this.restartTimer = null;
     this.hiddenSince = null;
+    this.lastBeat = Date.now();
+    // 画面が表示されているのに、1秒ごとの見張りが大きく空いたら、PCのスリープなどで止まっていた。戻ったら立て直す
+    setInterval(() => {
+      const now = Date.now();
+      const gap = now - this.lastBeat;
+      this.lastBeat = now;
+      if (this.wanted && gap > 8000 && document.visibilityState === "visible") {
+        if (!this.paused && !this.running) {
+          clearTimeout(this.restartTimer);
+          this.restartDelay = 300;
+          this.#launch();
+        }
+        this.handlers.onStalled?.(gap);
+      }
+    }, 1000);
     // 画面が他のウィンドウ（パワポなど）の裏に隠れると、Chromeは動きを抑える。隠れていた時間を知らせ、戻ったらすぐ聞き取りを立て直す
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "hidden") {
         this.hiddenSince = this.wanted ? Date.now() : null;
-      } else if (this.hiddenSince) {
+      } else {
+        this.lastBeat = Date.now(); // 隠れていた間の空白は、下の「隠れていた」の知らせで扱う（二重に知らせない）
+      }
+      if (document.visibilityState === "visible" && this.hiddenSince) {
         const ms = Date.now() - this.hiddenSince;
         this.hiddenSince = null;
         if (this.wanted && !this.paused && !this.running) {

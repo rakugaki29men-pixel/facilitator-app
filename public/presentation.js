@@ -57,6 +57,7 @@ const state = {
   tension: null,
   retry: null,
   hiddenMs: 0, // プレゼン中に、この画面が隠れていた時間の合計
+  stalledMs: 0, // プレゼン中に、スリープなどで動作が止まっていた時間の合計
 };
 
 
@@ -64,7 +65,10 @@ const state = {
 const mask = (text) => applyNg(text, settings.ngwords.list).text;
 
 const names = () => [...new Set(settings.participants.list.map((p) => p.name.trim()).filter(Boolean))];
-const keepAwake = createWakeLock(() => state.phase !== "idle");
+const keepAwake = createWakeLock(
+  () => state.phase !== "idle",
+  (ok) => (ok ? log("system", "🔒 画面が自動で消えないようにしています（PCの電源設定は、念のため確認してください）") : log("error", "⚠ この環境では、画面の自動オフ（スリープ）を防げていません。PCの電源設定で、スリープと画面オフを「なし」にしてください。")),
+);
 
 // ---- 画面 ----
 const PHASE_SECTIONS = {
@@ -201,7 +205,7 @@ function startPresent() {
   if (!isRecognitionSupported) return prepMessage("このブラウザは音声認識に対応していません。Chrome か Edge を使ってください。");
   prepMessage("");
 
-  Object.assign(state, { presenter, chunks: [], text: "", hits: [], qa: [], qIndex: 0, waiting: null, answerBuf: [], skipWait: false, tension: null, retry: null, hiddenMs: 0 });
+  Object.assign(state, { presenter, chunks: [], text: "", hits: [], qa: [], qIndex: 0, waiting: null, answerBuf: [], skipWait: false, tension: null, retry: null, hiddenMs: 0, stalledMs: 0 });
   state.runId++;
   state.presentStartedAt = Date.now();
   unlockAudio(); // 開始ボタンを押した今のうちに、あとからの自動再生を許可してもらう
@@ -244,9 +248,13 @@ function finishPresent() {
 // 確認画面に、プレゼン中に画面が隠れていた時間を出す（その間の書き起こしが欠けている可能性）
 function hiddenNote() {
   const node = $("#hidden-note");
-  const sec = Math.round(state.hiddenMs / 1000);
-  node.textContent = sec ? `⚠ プレゼン中に、この画面が合計約${sec}秒間、隠れていました。その間の聞き取りが欠けている可能性があります。必要なら、下の欄で補ってください。` : "";
-  node.hidden = !sec;
+  const hidden = Math.round(state.hiddenMs / 1000);
+  const stalled = Math.round(state.stalledMs / 1000);
+  const parts = [];
+  if (hidden) parts.push(`この画面が合計約${hidden}秒間、隠れていました`);
+  if (stalled) parts.push(`PCのスリープなどで、合計約${stalled}秒間、動作が止まっていた可能性があります`);
+  node.textContent = parts.length ? `⚠ プレゼン中に、${parts.join("。また、")}。その間の聞き取りが欠けている可能性があります。必要なら、下の欄で補ってください。` : "";
+  node.hidden = !parts.length;
 }
 
 function renderHits() {
@@ -557,6 +565,10 @@ const listener = new Listener({
       state.waiting.lastVoiceAt = Date.now();
       caption(text);
     }
+  },
+  onStalled(ms) {
+    if (state.phase === "presenting") state.stalledMs += ms;
+    log("error", `PCのスリープなどで、約${Math.round(ms / 1000)}秒間、動作が止まっていた可能性があります。その間の聞き取りは欠けています。`);
   },
   onHidden(ms) {
     if (state.phase === "presenting") state.hiddenMs += ms;

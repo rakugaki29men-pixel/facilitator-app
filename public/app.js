@@ -122,7 +122,10 @@ const bubble = createBubble($("#bubble"));
 const showBubble = bubble.show;
 const settleBubble = bubble.settle;
 // 画面が消えると聞き取りも止まるので、進行中は消灯させない
-const keepAwake = createWakeLock(() => state.running);
+const keepAwake = createWakeLock(
+  () => state.running,
+  (ok) => (ok ? log("system", "🔒 画面が自動で消えないようにしています（PCの電源設定は、念のため確認してください）") : log("error", "⚠ この環境では、画面の自動オフ（スリープ）を防げていません。PCの電源設定で、スリープと画面オフを「なし」にしてください。")),
+);
 
 // ---- 聞き取り ----
 let captionTimer = null;
@@ -143,6 +146,9 @@ const listener = new Listener({
     clearTimeout(captionTimer);
     $("#interim").textContent = `👂 ${text}`;
     state.lastVoiceAt = Date.now();
+  },
+  onStalled(ms) {
+    log("error", `PCのスリープなどで、約${Math.round(ms / 1000)}秒間、動作が止まっていた可能性があります。その間の聞き取りは欠けています。`);
   },
   onHidden(ms) {
     log("error", `この画面が約${Math.round(ms / 1000)}秒間、他のウィンドウの裏に隠れていました。その間の聞き取りが欠けている可能性があります（隠れると、Chromeが動きを抑えることがあります）。`);
